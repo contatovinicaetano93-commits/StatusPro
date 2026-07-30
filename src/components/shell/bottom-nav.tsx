@@ -2,15 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BOTTOM_NAV } from "@/components/shell/nav";
+import { bottomNavForRole } from "@/components/shell/nav";
+import type { Role } from "@/domain/roles";
 
-export function BottomNav() {
+export function BottomNav({ role }: { role: Role }) {
   const pathname = usePathname();
+  const items = bottomNavForRole(role);
+
+  if (items.length === 0) return null;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden">
       <div className="mx-auto flex w-full max-w-lg">
-        {BOTTOM_NAV.map(({ href, shortLabel, icon: Icon }) => {
+        {items.map(({ href, shortLabel, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link

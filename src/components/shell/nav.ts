@@ -9,6 +9,8 @@ import {
   Truck,
   Wallet,
 } from "lucide-react";
+import type { Role } from "@/domain/roles";
+import { canAccessPath } from "@/domain/access";
 
 export const APP_NAV = [
   { href: "/ceo", label: "Pulse / Hoje", shortLabel: "Hoje", icon: Sun },
@@ -27,6 +29,15 @@ export const SECONDARY_NAV = [
   { href: "/sync", label: "Sync Center", icon: Activity },
   { href: "/config", label: "Config", icon: Settings },
 ] as const;
+
+/** Bottom bar: prefer primary tabs; if role sees <2, fill with other allowed routes. */
+export function bottomNavForRole(role: Role) {
+  const primary = BOTTOM_NAV.filter((item) => canAccessPath(role, item.href));
+  if (primary.length >= 2) return primary;
+  return [...APP_NAV, ...SECONDARY_NAV]
+    .filter((item) => canAccessPath(role, item.href))
+    .slice(0, 4);
+}
 
 export function pageTitleFromPath(pathname: string) {
   if (pathname.startsWith("/ceo")) return "Pulse do dia";

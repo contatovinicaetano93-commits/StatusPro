@@ -5,17 +5,23 @@ import { usePathname } from "next/navigation";
 import { logoutAction } from "@/app/actions";
 import { getBrand } from "@/lib/brand";
 import { APP_NAV, SECONDARY_NAV } from "@/components/shell/nav";
+import { canAccessPath } from "@/domain/access";
+import type { Role } from "@/domain/roles";
 
 export function DesktopSidebar({
   userName,
   roleLabel,
+  role,
 }: {
   userName: string;
   roleLabel: string;
+  role: Role;
 }) {
   const pathname = usePathname();
   const brand = getBrand();
   const initial = userName.trim().charAt(0).toUpperCase() || "S";
+  const navItems = APP_NAV.filter((item) => canAccessPath(role, item.href));
+  const secondary = SECONDARY_NAV.filter((item) => canAccessPath(role, item.href));
 
   return (
     <aside className="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col border-r border-border bg-surface">
@@ -29,7 +35,7 @@ export function DesktopSidebar({
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 p-4">
-        {APP_NAV.map(({ href, label, icon: Icon }) => {
+        {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
@@ -50,7 +56,7 @@ export function DesktopSidebar({
       </nav>
 
       <div className="flex flex-col gap-1 px-4 pb-2">
-        {SECONDARY_NAV.map(({ href, label, icon: Icon }) => {
+        {secondary.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link

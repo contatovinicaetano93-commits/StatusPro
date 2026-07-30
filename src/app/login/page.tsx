@@ -19,9 +19,19 @@ export default async function LoginPage({
         <h1 className="mt-2 text-xl font-semibold">Acesso ao cockpit</h1>
         <p className="mt-2 text-sm text-muted">{brand.loginSubtitle}</p>
 
-        {params.error ? (
+        {params.error === "1" ? (
           <p className="mt-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
             Credenciais inválidas.
+          </p>
+        ) : null}
+        {params.error === "org" ? (
+          <p className="mt-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            Organização demo não encontrada. Rode <code>npm run db:seed</code>.
+          </p>
+        ) : null}
+        {params.error === "demo_disabled" ? (
+          <p className="mt-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+            Login demo desabilitado em produção. Defina ALLOW_DEMO_AUTH=true se for intencional.
           </p>
         ) : null}
 

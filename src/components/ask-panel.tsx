@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { regenerateBriefingAction } from "@/app/actions";
 import { askStatusProAction } from "@/app/ask-actions";
 
@@ -61,6 +62,7 @@ export function AskPanel({
 }
 
 export function BriefingActions() {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState("");
   return (
@@ -73,6 +75,7 @@ export function BriefingActions() {
           start(async () => {
             const res = await regenerateBriefingAction();
             setMsg(res.ok ? `Briefing gerado (${res.model})` : res.error);
+            if (res.ok) router.refresh();
           })
         }
       >

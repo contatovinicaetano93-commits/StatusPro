@@ -7,19 +7,25 @@ import { ChevronRight, Menu, X } from "lucide-react";
 import { logoutAction } from "@/app/actions";
 import { getBrand } from "@/lib/brand";
 import { APP_NAV, SECONDARY_NAV, pageTitleFromPath } from "@/components/shell/nav";
+import { canAccessPath, homePathForRole } from "@/domain/access";
+import type { Role } from "@/domain/roles";
 
 export function TopBar({
   userName,
   roleLabel,
+  role,
 }: {
   userName: string;
   roleLabel: string;
+  role: Role;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const title = pageTitleFromPath(pathname);
   const brand = getBrand();
   const initial = userName.trim().charAt(0).toUpperCase() || "S";
+  const items = [...APP_NAV, ...SECONDARY_NAV].filter((item) => canAccessPath(role, item.href));
+  const home = homePathForRole(role);
 
   return (
     <>
@@ -35,7 +41,7 @@ export function TopBar({
           </button>
 
           <div className="min-w-0 flex-1 lg:flex lg:items-center lg:justify-between">
-            <Link href="/ceo" className="flex items-baseline justify-center gap-1 lg:justify-start">
+            <Link href={home} className="flex items-baseline justify-center gap-1 lg:justify-start">
               <span className="font-mono text-lg font-semibold tracking-[0.2em] text-accent lg:hidden">
                 {brand.shortMonogram}
               </span>
@@ -83,7 +89,7 @@ export function TopBar({
             </div>
 
             <nav className="flex flex-col gap-1 px-3">
-              {[...APP_NAV, ...SECONDARY_NAV].map(({ href, label, icon: Icon }) => {
+              {items.map(({ href, label, icon: Icon }) => {
                 const active = pathname === href || pathname.startsWith(`${href}/`);
                 return (
                   <Link
