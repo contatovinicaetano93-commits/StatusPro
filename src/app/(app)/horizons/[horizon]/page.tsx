@@ -1,6 +1,6 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-ceo-home";
 import type { Horizon } from "@/domain/types";
 import { notFound } from "next/navigation";
 
@@ -19,15 +19,15 @@ export default async function HorizonPage({
   const { horizon: raw } = await params;
   if (!["daily", "weekly", "monthly", "quarterly"].includes(raw)) notFound();
   const horizon = raw as Horizon;
-  const home = await getCeoHome(horizon);
+  const board = await getKpiBoard({ horizons: [horizon] });
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Horizonte {LABELS[horizon]}</h1>
       <p className="muted">KPIs do horizonte com fórmula no tooltip de cada indicador.</p>
-      <FreshnessBanner freshness={home.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
       <KpiStrip
-        items={home.kpis.map((k) => ({
+        items={board.kpis.map((k) => ({
           definition: k.definition,
           value: k.value,
           target: k.target,
@@ -39,7 +39,7 @@ export default async function HorizonPage({
       <section className="panel" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Definições</h2>
         <div style={{ display: "grid", gap: "0.75rem" }}>
-          {home.kpis.map((k) => (
+          {board.kpis.map((k) => (
             <div key={k.kpiId}>
               <strong>{k.definition.name}</strong>
               <div className="muted" style={{ fontSize: 13 }}>

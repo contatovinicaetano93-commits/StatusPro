@@ -1,5 +1,5 @@
 import { getSql } from "@/infrastructure/db/client";
-import { listKpisByHorizon, withBand, getKpiDefinition } from "@/domain/kpis/engine";
+import { listKpisByHorizon, withBand } from "@/domain/kpis/engine";
 import { AlertItemSchema } from "@/domain/alerts/schemas";
 import type { AlertItem, Freshness, Horizon, KpiQuality, KpiSnapshot, OrgContext } from "@/domain/types";
 import { logger } from "@/lib/logger";
@@ -123,10 +123,10 @@ export async function getFreshness(orgId: string): Promise<Freshness> {
   }
 }
 
-export async function getOpenAlerts(orgId: string, limit = 24): Promise<AlertItem[]> {
+export async function getOpenAlerts(orgId: string, limit = 100): Promise<AlertItem[]> {
   try {
     const sql = getSql();
-    // Unsorted by impact; domain rankAlerts owns ordering.
+    // Wide fetch — domain rankAlerts owns ordering + slice.
     const rows = await sql`
       SELECT id, severity, title, detail, kpi_id, impact_brl, suggested_actions, created_at
       FROM alerts
@@ -313,6 +313,29 @@ export async function getTopOverdueCustomers(orgId: string) {
   }
 }
 
-export function explainKpi(kpiId: string) {
-  return getKpiDefinition(kpiId) ?? null;
+export async function insertSyncDeadLetter(input: {
+  organizationId: string;
+  entityType: string;
+  payload: unknown;
+  errorMessage: string;
+  syncRunId?: string | null;
+}) {
+  try {
+    const sql = getSql();
+    await sql`
+      INSERT INTO sync_dead_letters (
+        organization_id, sync_run_id, entity_type, payload, error_message
+      )
+      VALUES (
+        ${input.organizationId},
+        ${input.syncRunId ?? null},
+        ${input.entityType},
+        ${JSON.stringify(input.payload)}::jsonb,
+        ${input.errorMessage}
+      )
+    `;
+  } catch (err) {
+    logger.warn("insertSyncDeadLetter failed", { err: String(err) });
+  }
 }
+

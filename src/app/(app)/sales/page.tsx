@@ -1,19 +1,27 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-ceo-home";
 
 export default async function SalesPage() {
-  const week = await getCeoHome("weekly");
-  const month = await getCeoHome("monthly");
-  const items = [...week.kpis.filter((k) => ["revenue_week", "gross_margin_week", "freight_pct_week"].includes(k.kpiId)), ...month.kpis.filter((k) => ["revenue_month", "gross_margin_month", "top10_concentration"].includes(k.kpiId))];
+  const board = await getKpiBoard({
+    horizons: ["weekly", "monthly"],
+    kpiIds: [
+      "revenue_week",
+      "gross_margin_week",
+      "freight_pct_week",
+      "revenue_month",
+      "gross_margin_month",
+      "top10_concentration",
+    ],
+  });
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Vendas & Margem</h1>
       <p className="muted">Receita, margem e concentração — leia margem antes de acelerar volume.</p>
-      <FreshnessBanner freshness={week.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
       <KpiStrip
-        items={items.map((k) => ({
+        items={board.kpis.map((k) => ({
           definition: k.definition,
           value: k.value,
           target: k.target,

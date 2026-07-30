@@ -35,12 +35,13 @@ scripts/               # migrate + seed
 
 Regras:
 - Páginas e actions chamam só `application/` (use-cases); **não** SQL, repos ou orquestração de IA na UI
-- Tenant vem da **sessão** (`organizationId`), não de `NEXT_PUBLIC_DEFAULT_ORG_SLUG` nas leituras
+- Boards dedicados (`getCashBoard`, `getKpiBoard`, `getInventoryBoard`) — `getCeoHome` só no pulse CEO
+- Tenant vem da **sessão** (`organizationId`)
 - ERP entra só via `ErpGateway` (Zod nos boundaries; `ErpPullResultSchema` no sync)
-- Sync upserta fatos + recompute KPIs (`ingestErpPull` → `recomputeKpisFromPull`) e refresh de alertas operacionais
-- Ranking de alertas vive em `domain/alerts` (não na camada de IA)
+- Sync upserta fatos + recompute KPIs (`ingestErpPull`); seed reusa o mesmo pipeline
+- Ranking de alertas vive em `domain/alerts`; explicação de KPI em `domain/kpis/explain`
+- IA é tool-backed (`createStatusProTools`) + fail-soft com timeout; sem inventar números
 - Default `ERP_MODE=mock` até existir API FKN
-- IA é fail-soft: prefer `ANTHROPIC_API_KEY` (Claude); sem chave, briefing por regras continua
 
 ## Domínio / KPIs
 

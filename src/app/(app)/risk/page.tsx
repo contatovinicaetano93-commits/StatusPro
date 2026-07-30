@@ -1,22 +1,20 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-ceo-home";
 
 export default async function RiskPage() {
-  const month = await getCeoHome("monthly");
-  const week = await getCeoHome("weekly");
-  const items = [
-    ...month.kpis.filter((k) => ["top10_concentration", "dso", "cash_conversion_cycle"].includes(k.kpiId)),
-    ...week.kpis.filter((k) => k.kpiId === "freight_pct_week"),
-  ];
+  const board = await getKpiBoard({
+    horizons: ["monthly", "weekly"],
+    kpiIds: ["top10_concentration", "dso", "cash_conversion_cycle", "freight_pct_week"],
+  });
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Risco</h1>
       <p className="muted">Concentração de clientes, ciclo de caixa e frete — riscos silenciosos.</p>
-      <FreshnessBanner freshness={month.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
       <KpiStrip
-        items={items.map((k) => ({
+        items={board.kpis.map((k) => ({
           definition: k.definition,
           value: k.value,
           target: k.target,

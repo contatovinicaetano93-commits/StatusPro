@@ -1,6 +1,5 @@
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getRankedAlertsBoard, type RankedAlertView } from "@/application/get-ceo-home";
 import { KPI_CATALOG } from "@/domain/kpis/catalog";
-import type { RankedAlertView } from "@/application/get-ceo-home";
 
 export type AlertsBoardView = {
   rankedAlerts: RankedAlertView[];
@@ -8,9 +7,9 @@ export type AlertsBoardView = {
 };
 
 export async function getAlertsBoard(): Promise<AlertsBoardView> {
-  const home = await getCeoHome("daily");
+  const board = await getRankedAlertsBoard();
   return {
-    rankedAlerts: home.rankedAlerts,
+    rankedAlerts: board.rankedAlerts,
     playbooks: KPI_CATALOG.filter((k) => k.playbook?.length).map((k) => ({
       id: k.id,
       name: k.name,

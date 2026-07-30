@@ -1,15 +1,15 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getInventoryBoard } from "@/application/get-ceo-home";
 
 export default async function InventoryPage() {
-  const home = await getCeoHome("daily");
-  const stockouts = home.kpis.find((k) => k.kpiId === "stockout_sku_a");
+  const board = await getInventoryBoard();
+  const stockouts = board.stockoutKpi;
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Estoque & Rupturas</h1>
       <p className="muted">Foco em SKUs A — ruptura destrói fill rate e margem de contas nacionais.</p>
-      <FreshnessBanner freshness={home.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
       {stockouts ? (
         <article className="panel" style={{ marginBottom: "1rem" }}>
           <div className="muted" style={{ fontSize: 12 }}>
@@ -25,7 +25,7 @@ export default async function InventoryPage() {
       ) : null}
       <section className="panel">
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>SKUs A abaixo do mínimo</h2>
-        {home.stockouts.length === 0 ? (
+        {board.stockouts.length === 0 ? (
           <p className="muted">Nenhuma ruptura A no momento.</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
@@ -38,7 +38,7 @@ export default async function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {home.stockouts.map((s) => (
+              {board.stockouts.map((s) => (
                 <tr key={String(s.sku)} style={{ borderTop: "1px solid var(--line)" }}>
                   <td style={{ padding: "0.5rem 0" }}>
                     <strong>{String(s.sku)}</strong>

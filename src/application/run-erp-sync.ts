@@ -42,7 +42,13 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
 
     // Wide window so weekly/monthly KPI recompute from the pull stays realistic
     // until we aggregate from persisted facts in SQL.
-    const rawPull = await erp.pullIncremental(new Date(Date.now() - 120 * 86400000));
+    const pullPromise = erp.pullIncremental(new Date(Date.now() - 120 * 86400000));
+    const rawPull = await Promise.race([
+      pullPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("ERP pull timeout (45s)")), 45_000),
+      ),
+    ]);
     const pull = ErpPullResultSchema.parse(rawPull);
     const ingest = await ingestErpPull({
       organizationId: org.id,

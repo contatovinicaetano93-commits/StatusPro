@@ -1,18 +1,20 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-ceo-home";
 
 export default async function ServicePage() {
-  const home = await getCeoHome("daily");
-  const items = home.kpis.filter((k) => ["fill_rate_day", "otif_day", "returns_day", "stockout_sku_a"].includes(k.kpiId));
+  const board = await getKpiBoard({
+    horizons: ["daily"],
+    kpiIds: ["fill_rate_day", "otif_day", "returns_day", "stockout_sku_a"],
+  });
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Serviço (Fill rate / OTIF)</h1>
       <p className="muted">Pedidos completos e no prazo — a métrica que contas nacionais cobram.</p>
-      <FreshnessBanner freshness={home.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
       <KpiStrip
-        items={items.map((k) => ({
+        items={board.kpis.map((k) => ({
           definition: k.definition,
           value: k.value,
           target: k.target,

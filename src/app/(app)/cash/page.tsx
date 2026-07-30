@@ -1,19 +1,18 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
-import { getCeoHome } from "@/application/get-ceo-home";
+import { getCashBoard } from "@/application/get-ceo-home";
 import { formatKpiValue, getKpiDefinition } from "@/domain/kpis/engine";
 
 export default async function CashPage() {
-  const home = await getCeoHome("daily");
-  const weekly = await getCeoHome("weekly");
-  const cash = home.kpis.find((k) => k.kpiId === "cash_in_day");
-  const overdue = home.kpis.find((k) => k.kpiId === "overdue_ar");
-  const aging = weekly.kpis.find((k) => k.kpiId === "ar_aging_60");
+  const board = await getCashBoard();
+  const cash = board.kpis.find((k) => k.kpiId === "cash_in_day");
+  const overdue = board.kpis.find((k) => k.kpiId === "overdue_ar");
+  const aging = board.kpis.find((k) => k.kpiId === "ar_aging_60");
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Caixa & Recebíveis</h1>
       <p className="muted">Fluxo do dia, inadimplência e aging — foco em ação de cobrança.</p>
-      <FreshnessBanner freshness={home.freshness} />
+      <FreshnessBanner freshness={board.freshness} />
 
       <div className="grid-kpi" style={{ marginBottom: "1rem" }}>
         {[cash, overdue, aging].filter(Boolean).map((k) =>
@@ -32,7 +31,7 @@ export default async function CashPage() {
 
       <section className="panel">
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Top clientes em atraso</h2>
-        {home.overdueCustomers.length === 0 ? (
+        {board.overdueCustomers.length === 0 ? (
           <p className="muted">Sem títulos vencidos no seed — ou rode a sync.</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
@@ -44,7 +43,7 @@ export default async function CashPage() {
               </tr>
             </thead>
             <tbody>
-              {home.overdueCustomers.map((c, idx) => {
+              {board.overdueCustomers.map((c, idx) => {
                 const def = getKpiDefinition("overdue_ar");
                 return (
                   <tr key={idx} style={{ borderTop: "1px solid var(--line)" }}>

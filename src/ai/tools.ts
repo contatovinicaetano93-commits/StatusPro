@@ -1,26 +1,29 @@
-import { generateText, type LanguageModel } from "ai";
+import { generateText, stepCountIs, tool, type LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { z } from "zod";
 import { getEnv, isFeatureEnabled } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getKpiDefinition, formatKpiValue } from "@/domain/kpis/engine";
 import { defaultSuggestedActions, rankAlerts } from "@/domain/alerts/rank";
-import type { AlertItem } from "@/domain/types";
+import type { KpiEvidence } from "@/domain/kpis/explain";
+import type { AlertItem, Horizon } from "@/domain/types";
+import {
+  getLatestKpis,
+  getOpenAlerts,
+  getStockoutSkus,
+  getTopOverdueCustomers,
+} from "@/infrastructure/db/repositories";
 
-export { rankAlerts, defaultSuggestedActions as suggestActions } from "@/domain/alerts/rank";
-
-export type Evidence = {
-  kpiId: string;
-  label: string;
-  valueFormatted: string;
-  period: string;
-};
+export type Evidence = KpiEvidence;
 
 export type BriefingInput = {
   asOfDate: string;
   kpis: Array<{ kpiId: string; value: number; target?: number | null; band: string }>;
   alerts: AlertItem[];
 };
+
+const LLM_TIMEOUT_MS = 12_000;
 
 function resolveLlm(): { model: LanguageModel; modelId: string } | null {
   const env = getEnv();
@@ -34,6 +37,22 @@ function resolveLlm(): { model: LanguageModel; modelId: string } | null {
     return { model: openai("gpt-4o-mini"), modelId: "gpt-4o-mini" };
   }
   return null;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`LLM timeout after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 function buildEvidence(input: BriefingInput): Evidence[] {
@@ -51,42 +70,73 @@ function buildEvidence(input: BriefingInput): Evidence[] {
   });
 }
 
-export function explainKpiDeviation(args: {
-  kpiId: string;
-  value: number;
-  target?: number | null;
-  band: string;
-  relatedAlerts: AlertItem[];
-}): { summary: string; evidence: Evidence[]; actions: string[] } {
-  const def = getKpiDefinition(args.kpiId);
-  if (!def) {
-    return {
-      summary: "KPI não encontrado no catálogo. Não invento número sem definição.",
-      evidence: [],
-      actions: ["Verificar id do KPI em domain/kpis/catalog"],
-    };
-  }
-  const formatted = formatKpiValue(def, args.value);
-  const targetText =
-    args.target != null ? ` Meta: ${formatKpiValue(def, args.target)}.` : "";
-  const alertHints = args.relatedAlerts.map((a) => a.title).slice(0, 3);
-  const summary = [
-    `${def.name} está ${args.band === "green" ? "no alvo" : args.band === "yellow" ? "em atenção" : "fora do alvo"}: ${formatted}.${targetText}`,
-    `Fórmula: ${def.formula}. Fonte: ${def.source}.`,
-    alertHints.length ? `Sinais correlatos: ${alertHints.join("; ")}.` : "Sem alertas correlatos abertos.",
-  ].join(" ");
-
+/** Tool-backed cockpit facts — AI narrates only what tools return. */
+export function createStatusProTools(organizationId: string) {
   return {
-    summary,
-    evidence: [
-      {
-        kpiId: def.id,
-        label: def.name,
-        valueFormatted: formatted,
-        period: "período corrente",
+    getKpis: tool({
+      description: "Lista KPIs do horizonte com valor, meta e banda. Cite kpiId nas respostas.",
+      inputSchema: z.object({
+        horizon: z.enum(["daily", "weekly", "monthly", "quarterly"]).default("daily"),
+      }),
+      execute: async ({ horizon }: { horizon: Horizon }) => {
+        const kpis = await getLatestKpis(organizationId, horizon);
+        return kpis.map((k) => ({
+          kpiId: k.kpiId,
+          name: k.definition.name,
+          value: k.value,
+          formatted: k.formatted,
+          target: k.target,
+          band: k.band,
+          quality: k.quality,
+        }));
       },
-    ],
-    actions: def.playbook ?? ["Investigar breakdown por região/cliente/SKU", "Validar freshness da sync"],
+    }),
+    getOpenAlerts: tool({
+      description: "Alertas abertos ranqueados por severidade e impacto financeiro.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(20).default(8),
+      }),
+      execute: async ({ limit }: { limit: number }) => {
+        const alerts = rankAlerts(await getOpenAlerts(organizationId, 100)).slice(0, limit);
+        return alerts.map((a) => ({
+          id: a.id,
+          severity: a.severity,
+          title: a.title,
+          detail: a.detail,
+          kpiId: a.kpiId,
+          impactBrl: a.impactBrl,
+          actions: defaultSuggestedActions(a),
+        }));
+      },
+    }),
+    getStockouts: tool({
+      description: "SKUs classe A abaixo do estoque mínimo.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const rows = await getStockoutSkus(organizationId);
+        return rows.map((s) => ({
+          sku: String(s.sku),
+          name: String(s.name),
+          family: String(s.family),
+          onHand: Number(s.on_hand),
+          minStock: Number(s.min_stock),
+          warehouse: String(s.warehouse),
+        }));
+      },
+    }),
+    getOverdueCustomers: tool({
+      description: "Top clientes com recebíveis vencidos em aberto.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const rows = await getTopOverdueCustomers(organizationId);
+        return rows.map((c) => ({
+          name: String(c.name),
+          uf: String(c.uf),
+          isNationalAccount: Boolean(c.is_national_account),
+          openAmountBrl: Number(c.open_amount),
+        }));
+      },
+    }),
   };
 }
 
@@ -111,14 +161,19 @@ export function ruleBasedBriefing(input: BriefingInput): {
       : ["- Nenhum alerta crítico aberto no momento."]),
     "",
     "### O que fazer agora",
-    ...ranked.flatMap((a) => defaultSuggestedActions(a).slice(0, 2).map((s) => `- ${s}`)).slice(0, 6),
+    ...ranked
+      .flatMap((a) => defaultSuggestedActions(a).slice(0, 2).map((s) => `- ${s}`))
+      .slice(0, 6),
     "",
     "_Gerado em modo fail-soft (regras). Se a IA generativa estiver disponível, este texto é enriquecido sem alterar os números._",
   ];
   return { contentMd: lines.join("\n"), evidence, model: "rule-based" };
 }
 
-export async function generateCeoBriefing(input: BriefingInput) {
+export async function generateCeoBriefing(
+  input: BriefingInput,
+  organizationId?: string,
+) {
   if (!isFeatureEnabled("ai_briefing")) {
     return ruleBasedBriefing(input);
   }
@@ -128,6 +183,29 @@ export async function generateCeoBriefing(input: BriefingInput) {
   if (!llm) return fallback;
 
   try {
+    if (organizationId) {
+      const result = await withTimeout(
+        generateText({
+          model: llm.model,
+          temperature: 0.2,
+          stopWhen: stepCountIs(4),
+          tools: createStatusProTools(organizationId),
+          prompt: [
+            "Você é o copiloto executivo do StatusPro (distribuidora limpeza/papel ~R$100mi/ano).",
+            "Use as tools para obter KPIs e alertas. NÃO invente números.",
+            "Cite kpiId ao mencionar valores. Estruture: Pulse / O que está errado / Por quê / O que fazer (máx 5).",
+            `Data: ${input.asOfDate}`,
+          ].join("\n"),
+        }),
+        LLM_TIMEOUT_MS,
+      );
+      return {
+        contentMd: result.text || fallback.contentMd,
+        evidence: fallback.evidence,
+        model: llm.modelId,
+      };
+    }
+
     const evidenceBlock = fallback.evidence
       .map((e) => `${e.label}=${e.valueFormatted} [${e.kpiId}]`)
       .join("; ");
@@ -136,36 +214,34 @@ export async function generateCeoBriefing(input: BriefingInput) {
       .map((a) => `${a.severity}: ${a.title} — ${a.detail}`)
       .join("\n");
 
-    const { text } = await generateText({
-      model: llm.model,
-      temperature: 0.2,
-      prompt: [
-        "Você é o copiloto executivo do StatusPro para uma distribuidora de limpeza e papel (~R$100mi/ano).",
-        "Escreva um briefing diário em português brasileiro, objetivo, para o CEO.",
-        "NÃO invente números. Use APENAS os dados fornecidos. Cite KPI ids quando mencionar valores.",
-        "Estruture: Pulse / O que está errado / Por quê (hipóteses) / O que fazer agora (máx 5 ações).",
-        `Data: ${input.asOfDate}`,
-        `Evidências: ${evidenceBlock}`,
-        `Alertas:\n${alertBlock || "nenhum"}`,
-      ].join("\n"),
-    });
+    const { text } = await withTimeout(
+      generateText({
+        model: llm.model,
+        temperature: 0.2,
+        prompt: [
+          "Você é o copiloto executivo do StatusPro.",
+          "NÃO invente números. Use APENAS os dados fornecidos. Cite KPI ids.",
+          "Estruture: Pulse / O que está errado / Por quê / O que fazer agora (máx 5).",
+          `Data: ${input.asOfDate}`,
+          `Evidências: ${evidenceBlock}`,
+          `Alertas:\n${alertBlock || "nenhum"}`,
+        ].join("\n"),
+      }),
+      LLM_TIMEOUT_MS,
+    );
 
-    return {
-      contentMd: text,
-      evidence: fallback.evidence,
-      model: llm.modelId,
-    };
+    return { contentMd: text, evidence: fallback.evidence, model: llm.modelId };
   } catch (err) {
     logger.warn("generateCeoBriefing LLM failed; using rule-based", { err: String(err) });
     return fallback;
   }
 }
 
-export async function answerStatusProQuestion(args: {
+function ruleAnswer(args: {
   question: string;
   kpis: BriefingInput["kpis"];
   alerts: AlertItem[];
-}) {
+}): string | null {
   const q = args.question.toLowerCase();
   if (q.includes("margem")) {
     const margin = args.kpis.find((k) => k.kpiId.includes("margin"));
@@ -187,19 +263,42 @@ export async function answerStatusProQuestion(args: {
     if (!overdue || !def) return "Sem dado de recebíveis vencidos.";
     return `Risco de caixa: recebíveis vencidos em ${formatKpiValue(def, overdue.value)}. Foque top clientes inadimplentes e contas nacionais com maior open amount.`;
   }
+  return null;
+}
+
+export async function answerStatusProQuestion(args: {
+  question: string;
+  organizationId: string;
+  kpis: BriefingInput["kpis"];
+  alerts: AlertItem[];
+}) {
+  const ruled = ruleAnswer(args);
+  if (ruled) return ruled;
 
   const llm = resolveLlm();
   if (!llm) {
     return "Posso responder com os KPIs carregados (margem, ruptura, caixa). Para perguntas livres, configure ANTHROPIC_API_KEY.";
   }
+
   try {
-    const { text } = await generateText({
-      model: llm.model,
-      temperature: 0.2,
-      prompt: `Responda em PT-BR, executivo, sem inventar números.\nPergunta: ${args.question}\nKPIs: ${JSON.stringify(args.kpis)}\nAlertas: ${JSON.stringify(args.alerts.slice(0, 5))}`,
-    });
-    return text;
-  } catch {
+    const result = await withTimeout(
+      generateText({
+        model: llm.model,
+        temperature: 0.2,
+        stopWhen: stepCountIs(5),
+        tools: createStatusProTools(args.organizationId),
+        prompt: [
+          "Responda em PT-BR, tom executivo.",
+          "Use tools para fatos. NÃO invente números. Se a tool não trouxer o dado, diga que não tem.",
+          "Cite kpiId quando mencionar valores.",
+          `Pergunta: ${args.question}`,
+        ].join("\n"),
+      }),
+      LLM_TIMEOUT_MS,
+    );
+    return result.text || "Sem resposta do modelo. Tente uma pergunta sobre margem, ruptura ou caixa.";
+  } catch (err) {
+    logger.warn("answerStatusProQuestion LLM failed", { err: String(err) });
     return "Falha ao consultar o modelo. Use as perguntas sugeridas ou tente novamente.";
   }
 }

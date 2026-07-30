@@ -4,6 +4,7 @@ import { getSql } from "@/infrastructure/db/client";
 import type { ErpPullResult } from "@/infrastructure/erp/gateway";
 import type { OperationalAlertDraft } from "@/domain/alerts/schemas";
 import type { RecomputeSnapshot } from "@/domain/kpis/recompute";
+import { insertSyncDeadLetter } from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
 
 const DEFAULT_UFS = ["SP", "RJ", "MG", "PR", "RS", "BA", "GO", "SC", "PE", "DF"] as const;
@@ -231,7 +232,15 @@ export async function upsertErpFacts(args: {
         const orderRows = pull.orders
           .map((o) => {
             const customerId = customerMap.get(o.customerExternalId);
-            if (!customerId) return null;
+            if (!customerId) {
+              void insertSyncDeadLetter({
+                organizationId,
+                entityType: "sales_order",
+                payload: o,
+                errorMessage: `customer missing: ${o.customerExternalId}`,
+              });
+              return null;
+            }
             return [
               organizationId,
               o.externalId,

@@ -8,7 +8,6 @@ const rawSchema = z.object({
   AI_GATEWAY_API_KEY: z.string().optional().default(""),
   FEATURE_FLAGS: z.string().optional().default("ai_briefing,ai_chat,sync_center,playbooks"),
   NEXT_PUBLIC_APP_NAME: z.string().default("StatusPro"),
-  NEXT_PUBLIC_DEFAULT_ORG_SLUG: z.string().default("distribuidora-demo"),
   ALLOW_DEMO_AUTH: z.string().optional(),
   ERP_MODE: z.enum(["mock", "fkn"]).optional().default("mock"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -22,7 +21,6 @@ export type AppEnv = {
   AI_GATEWAY_API_KEY: string;
   FEATURE_FLAGS: string;
   NEXT_PUBLIC_APP_NAME: string;
-  NEXT_PUBLIC_DEFAULT_ORG_SLUG: string;
   ALLOW_DEMO_AUTH: boolean;
   ERP_MODE: "mock" | "fkn";
   NODE_ENV: "development" | "test" | "production";
@@ -40,7 +38,6 @@ export function getEnv(): AppEnv {
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
     FEATURE_FLAGS: process.env.FEATURE_FLAGS,
     NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
-    NEXT_PUBLIC_DEFAULT_ORG_SLUG: process.env.NEXT_PUBLIC_DEFAULT_ORG_SLUG,
     ALLOW_DEMO_AUTH: process.env.ALLOW_DEMO_AUTH,
     ERP_MODE: process.env.ERP_MODE,
     NODE_ENV: process.env.NODE_ENV,
@@ -75,7 +72,6 @@ export function getEnv(): AppEnv {
     AI_GATEWAY_API_KEY: raw.AI_GATEWAY_API_KEY,
     FEATURE_FLAGS: raw.FEATURE_FLAGS,
     NEXT_PUBLIC_APP_NAME: raw.NEXT_PUBLIC_APP_NAME,
-    NEXT_PUBLIC_DEFAULT_ORG_SLUG: raw.NEXT_PUBLIC_DEFAULT_ORG_SLUG,
     ALLOW_DEMO_AUTH: allowDemoAuth,
     ERP_MODE: raw.ERP_MODE ?? "mock",
     NODE_ENV: raw.NODE_ENV,
