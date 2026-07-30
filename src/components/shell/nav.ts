@@ -26,8 +26,8 @@ export const APP_NAV = [
 export const BOTTOM_NAV = APP_NAV.slice(0, 4);
 
 export const SECONDARY_NAV = [
-  { href: "/sync", label: "Sync Center", icon: Activity },
-  { href: "/config", label: "Config", icon: Settings },
+  { href: "/sync", label: "Sync Center", shortLabel: "Sync", icon: Activity },
+  { href: "/config", label: "Config", shortLabel: "Config", icon: Settings },
 ] as const;
 
 /** Bottom bar: prefer primary tabs; if role sees <2, fill with other allowed routes. */
