@@ -3,6 +3,7 @@ import { recomputeKpisFromPull } from "@/domain/kpis/recompute";
 import {
   countPullRecords,
   insertKpiSnapshots,
+  loadRecomputePullFromDb,
   replaceOpenOperationalAlerts,
   slimPullForPersist,
   upsertErpFacts,
@@ -39,17 +40,20 @@ export async function ingestErpPull(args: {
     warehouseId: masters.warehouseId,
   });
 
-  // Recompute from the full pull so weekly/monthly KPIs stay realistic.
-  const recompute = recomputeKpisFromPull(args.pull, {
+  // Production path: recompute from persisted facts (not the in-memory pull).
+  const dbPull = await loadRecomputePullFromDb(args.organizationId);
+  const recompute = recomputeKpisFromPull(dbPull, {
     asOfDate,
     annualRevenueTargetBrl: args.annualRevenueTargetBrl,
     source: args.source,
+    quality: facts.error > 0 ? "partial" : "ok",
   });
 
   await insertKpiSnapshots({
     organizationId: args.organizationId,
     source: args.source,
     snapshots: recompute.snapshots,
+    quality: facts.error > 0 ? "partial" : "ok",
   });
 
   const alerts = buildOperationalAlerts(recompute.metrics);
@@ -68,6 +72,7 @@ export async function ingestErpPull(args: {
     recordsError,
     kpiCount: recompute.snapshots.length,
     alertCount: alerts.length,
+    recomputeSource: "db",
   });
 
   return {

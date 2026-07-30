@@ -1,5 +1,5 @@
 import { generateCeoBriefing } from "@/ai/tools";
-import { getAiContext } from "@/application/get-ceo-home";
+import { getAiContext } from "@/application/get-ai-context";
 import { insertAiBriefing } from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
 

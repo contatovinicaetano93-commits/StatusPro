@@ -1,9 +1,7 @@
-import { KPI_CATALOG } from "@/domain/kpis/catalog";
-import { isFeatureEnabled, getEnv } from "@/lib/env";
-import { ROLE_LABELS, ROLES } from "@/domain/roles";
+import { getConfigView } from "@/application/get-config-view";
 
-export default function ConfigPage() {
-  const flags = ["ai_briefing", "ai_chat", "sync_center", "playbooks"] as const;
+export default async function ConfigPage() {
+  const view = await getConfigView();
 
   return (
     <div>
@@ -23,30 +21,32 @@ export default function ConfigPage() {
       <section className="panel" style={{ marginBottom: "1rem" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Feature flags</h2>
         <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
-          {flags.map((f) => (
-            <li key={f}>
-              <code>{f}</code> — {isFeatureEnabled(f) ? "on" : "off"}
+          {view.featureFlags.map((f) => (
+            <li key={f.id}>
+              <code>{f.id}</code> — {f.enabled ? "on" : "off"}
             </li>
           ))}
         </ul>
         <p className="muted" style={{ fontSize: 13 }}>
-          Fonte: FEATURE_FLAGS={getEnv().FEATURE_FLAGS}
+          Fonte: FEATURE_FLAGS={view.featureFlagsRaw}
         </p>
       </section>
 
       <section className="panel" style={{ marginBottom: "1rem" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Papéis</h2>
         <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
-          {ROLES.map((r) => (
-            <li key={r}>{ROLE_LABELS[r]}</li>
+          {view.roles.map((r) => (
+            <li key={r.id}>{r.label}</li>
           ))}
         </ul>
       </section>
 
       <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Catálogo de KPIs ({KPI_CATALOG.length})</h2>
+        <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>
+          Catálogo de KPIs ({view.kpis.length})
+        </h2>
         <div style={{ display: "grid", gap: "0.65rem", fontSize: 14 }}>
-          {KPI_CATALOG.map((k) => (
+          {view.kpis.map((k) => (
             <div key={k.id} style={{ borderTop: "1px solid var(--line)", paddingTop: "0.5rem" }}>
               <strong>
                 {k.name} <span className="muted">({k.id})</span>

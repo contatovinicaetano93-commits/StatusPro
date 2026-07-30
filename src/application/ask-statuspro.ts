@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { answerStatusProQuestion } from "@/ai/tools";
-import { getAiContext } from "@/application/get-ceo-home";
+import { getAiContext } from "@/application/get-ai-context";
 
 const AskInputSchema = z.object({
   question: z.string().trim().min(3).max(500),

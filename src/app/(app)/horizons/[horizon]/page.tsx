@@ -1,6 +1,6 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getKpiBoard } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-kpi-board";
 import type { Horizon } from "@/domain/types";
 import { notFound } from "next/navigation";
 

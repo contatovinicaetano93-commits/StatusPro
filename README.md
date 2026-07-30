@@ -38,9 +38,10 @@ Regras:
 - Boards dedicados (`getCashBoard`, `getKpiBoard`, `getInventoryBoard`) — `getCeoHome` só no pulse CEO
 - Tenant vem da **sessão** (`organizationId`)
 - ERP entra só via `ErpGateway` (Zod nos boundaries; `ErpPullResultSchema` no sync)
-- Sync upserta fatos + recompute KPIs (`ingestErpPull`); seed reusa o mesmo pipeline
-- Ranking de alertas vive em `domain/alerts`; explicação de KPI em `domain/kpis/explain`
-- IA é tool-backed (`createStatusProTools`) + fail-soft com timeout; sem inventar números
+- Sync upserta fatos + **recompute KPIs a partir do DB**; seed reusa o mesmo pipeline
+- Dead letters listados no Sync Center; circuit breaker via `sync_runs` (persistido)
+- Ranking único: `toRankedAlertView`; explicação em `domain/kpis/explain`
+- IA tool-backed (`createStatusProTools`) + fail-soft com timeout; sem inventar números
 - Default `ERP_MODE=mock` até existir API FKN
 
 ## Domínio / KPIs

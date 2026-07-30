@@ -3,7 +3,7 @@ import { getEnv } from "@/lib/env";
 import { getSql } from "@/infrastructure/db/client";
 import type { ErpPullResult } from "@/infrastructure/erp/gateway";
 import type { OperationalAlertDraft } from "@/domain/alerts/schemas";
-import type { RecomputeSnapshot } from "@/domain/kpis/recompute";
+import type { RecomputePull, RecomputeSnapshot } from "@/domain/kpis/recompute";
 import { insertSyncDeadLetter } from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
 
@@ -26,8 +26,8 @@ export function freightExternalId(f: {
   return `frt:${f.costDate}:${f.uf}:${f.amountBrl.toFixed(2)}:${f.orderExternalId ?? "none"}`;
 }
 
-/** Keep transactional DB lean; KPI recompute still uses the full pull in memory. */
-export function slimPullForPersist(pull: ErpPullResult, keepDays = 21): ErpPullResult {
+/** Keep enough history for monthly KPIs when recomputing from DB. */
+export function slimPullForPersist(pull: ErpPullResult, keepDays = 120): ErpPullResult {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - keepDays);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
@@ -422,8 +422,10 @@ export async function insertKpiSnapshots(args: {
   organizationId: string;
   source: string;
   snapshots: RecomputeSnapshot[];
+  quality?: "ok" | "stale" | "partial" | "error";
 }): Promise<void> {
   const sql = getSql();
+  const quality = args.quality ?? "ok";
   for (const s of args.snapshots) {
     await sql`
       INSERT INTO kpi_snapshots (
@@ -437,7 +439,7 @@ export async function insertKpiSnapshots(args: {
         ${s.value},
         ${s.target ?? null},
         ${args.source},
-        'ok'
+        ${quality}
       )
     `;
   }
@@ -489,4 +491,94 @@ export function countPullRecords(pull: ErpPullResult): number {
     pull.stock.length +
     pull.freight.length
   );
+}
+
+/** Build RecomputePull from persisted facts (production KPI path). */
+export async function loadRecomputePullFromDb(organizationId: string): Promise<RecomputePull> {
+  return withPg(async (client) => {
+    const customers = await client.query(
+      `SELECT external_id FROM customers WHERE organization_id = $1 AND external_id IS NOT NULL`,
+      [organizationId],
+    );
+    const products = await client.query(
+      `SELECT sku, abc_class, unit_cost_brl, min_stock FROM products WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const orders = await client.query(
+      `SELECT order_date, requested_lines, fulfilled_lines, on_time_in_full
+       FROM sales_orders WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const invoices = await client.query(
+      `SELECT c.external_id AS customer_external_id, i.invoice_date, i.net_amount_brl, i.cogs_brl
+       FROM invoices i
+       JOIN customers c ON c.id = i.customer_id
+       WHERE i.organization_id = $1 AND c.external_id IS NOT NULL`,
+      [organizationId],
+    );
+    const receivables = await client.query(
+      `SELECT due_date, open_amount_brl, status FROM receivables WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const payments = await client.query(
+      `SELECT payment_date, amount_brl FROM payments WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const freight = await client.query(
+      `SELECT cost_date, amount_brl FROM freight_costs WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const stock = await client.query(
+      `SELECT DISTINCT ON (p.sku) p.sku, s.on_hand
+       FROM stock_snapshots s
+       JOIN products p ON p.id = s.product_id
+       WHERE s.organization_id = $1
+       ORDER BY p.sku, s.as_of_date DESC`,
+      [organizationId],
+    );
+
+    const toIso = (v: unknown) => {
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
+
+    return {
+      customers: customers.rows.map((r) => ({ externalId: String(r.external_id) })),
+      products: products.rows.map((r) => ({
+        sku: String(r.sku),
+        abcClass: r.abc_class as "A" | "B" | "C",
+        unitCostBrl: Number(r.unit_cost_brl),
+        minStock: Number(r.min_stock),
+      })),
+      orders: orders.rows.map((r) => ({
+        orderDate: toIso(r.order_date),
+        requestedLines: Number(r.requested_lines),
+        fulfilledLines: Number(r.fulfilled_lines),
+        onTimeInFull: r.on_time_in_full as boolean | null,
+      })),
+      invoices: invoices.rows.map((r) => ({
+        customerExternalId: String(r.customer_external_id),
+        invoiceDate: toIso(r.invoice_date),
+        netAmountBrl: Number(r.net_amount_brl),
+        cogsBrl: Number(r.cogs_brl),
+      })),
+      receivables: receivables.rows.map((r) => ({
+        dueDate: toIso(r.due_date),
+        openAmountBrl: Number(r.open_amount_brl),
+        status: String(r.status),
+      })),
+      payments: payments.rows.map((r) => ({
+        paymentDate: toIso(r.payment_date),
+        amountBrl: Number(r.amount_brl),
+      })),
+      stock: stock.rows.map((r) => ({
+        sku: String(r.sku),
+        onHand: Number(r.on_hand),
+      })),
+      freight: freight.rows.map((r) => ({
+        costDate: toIso(r.cost_date),
+        amountBrl: Number(r.amount_brl),
+      })),
+    };
+  });
 }

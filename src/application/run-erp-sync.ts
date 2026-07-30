@@ -1,11 +1,12 @@
 import { ingestErpPull } from "@/application/ingest-erp-pull";
 import { getErpGateway } from "@/infrastructure/erp";
 import { ErpPullResultSchema } from "@/infrastructure/erp/gateway";
-import { getOrganizationById, insertSyncRun } from "@/infrastructure/db/repositories";
+import {
+  getOrganizationById,
+  insertSyncRun,
+  isErpCircuitOpen,
+} from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
-import { CircuitBreaker } from "@/infrastructure/erp/circuit-breaker";
-
-const erpBreaker = new CircuitBreaker(3, 30_000);
 
 export type RunErpSyncResult =
   | { ok: true; records: number; source: string; latencyMs: number }
@@ -15,8 +16,8 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
   const org = await getOrganizationById(organizationId);
   if (!org) return { ok: false, error: "Org ausente" };
 
-  if (!erpBreaker.canRequest()) {
-    return { ok: false, error: "ERP em circuit breaker — aguarde o cooldown." };
+  if (await isErpCircuitOpen(org.id)) {
+    return { ok: false, error: "ERP em circuit breaker — aguarde o cooldown (via sync_runs)." };
   }
 
   const erp = getErpGateway();
@@ -25,7 +26,6 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
   try {
     const health = await erp.healthcheck();
     if (!health.ok) {
-      erpBreaker.failure();
       await insertSyncRun({
         organizationId: org.id,
         source: erp.sourceName,
@@ -40,8 +40,7 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
       return { ok: false, error: health.detail ?? "ERP unhealthy" };
     }
 
-    // Wide window so weekly/monthly KPI recompute from the pull stays realistic
-    // until we aggregate from persisted facts in SQL.
+    // Wide window; KPIs recompute from DB after upsert.
     const pullPromise = erp.pullIncremental(new Date(Date.now() - 120 * 86400000));
     const rawPull = await Promise.race([
       pullPromise,
@@ -77,14 +76,11 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
     });
 
     if (status === "failed") {
-      erpBreaker.failure();
       return { ok: false, error: "Ingest falhou sem registros ok" };
     }
 
-    erpBreaker.success();
     return { ok: true, records: ingest.recordsOk, source: erp.sourceName, latencyMs };
   } catch (err) {
-    erpBreaker.failure();
     logger.error("sync failed", { err: String(err) });
     await insertSyncRun({
       organizationId: org.id,

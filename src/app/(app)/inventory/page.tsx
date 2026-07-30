@@ -1,5 +1,5 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
-import { getInventoryBoard } from "@/application/get-ceo-home";
+import { getInventoryBoard } from "@/application/get-inventory-board";
 
 export default async function InventoryPage() {
   const board = await getInventoryBoard();

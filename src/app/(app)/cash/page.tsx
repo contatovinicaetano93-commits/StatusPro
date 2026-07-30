@@ -1,6 +1,5 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
-import { getCashBoard } from "@/application/get-ceo-home";
-import { formatKpiValue, getKpiDefinition } from "@/domain/kpis/engine";
+import { getCashBoard } from "@/application/get-cash-board";
 
 export default async function CashPage() {
   const board = await getCashBoard();
@@ -43,23 +42,16 @@ export default async function CashPage() {
               </tr>
             </thead>
             <tbody>
-              {board.overdueCustomers.map((c, idx) => {
-                const def = getKpiDefinition("overdue_ar");
-                return (
-                  <tr key={idx} style={{ borderTop: "1px solid var(--line)" }}>
-                    <td style={{ padding: "0.5rem 0" }}>
-                      {String(c.name)}
-                      {c.is_national_account ? " · nacional" : ""}
-                    </td>
-                    <td>{String(c.uf)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {def
-                        ? formatKpiValue(def, Number(c.open_amount))
-                        : Number(c.open_amount).toLocaleString("pt-BR")}
-                    </td>
-                  </tr>
-                );
-              })}
+              {board.overdueCustomers.map((c) => (
+                <tr key={`${c.name}-${c.uf}`} style={{ borderTop: "1px solid var(--line)" }}>
+                  <td style={{ padding: "0.5rem 0" }}>
+                    {c.name}
+                    {c.isNationalAccount ? " · nacional" : ""}
+                  </td>
+                  <td>{c.uf}</td>
+                  <td style={{ textAlign: "right" }}>{c.openAmountFormatted}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}

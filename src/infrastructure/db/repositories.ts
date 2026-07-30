@@ -339,3 +339,65 @@ export async function insertSyncDeadLetter(input: {
   }
 }
 
+export type SyncDeadLetterRow = {
+  id: string;
+  entityType: string;
+  errorMessage: string;
+  payloadPreview: string;
+  createdAt: string;
+};
+
+export async function listSyncDeadLetters(
+  orgId: string,
+  limit = 20,
+): Promise<SyncDeadLetterRow[]> {
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, entity_type, error_message, payload, created_at
+      FROM sync_dead_letters
+      WHERE organization_id = ${orgId}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map((r) => {
+      const payload = r.payload;
+      const preview =
+        typeof payload === "string"
+          ? payload.slice(0, 160)
+          : JSON.stringify(payload).slice(0, 160);
+      return {
+        id: String(r.id),
+        entityType: String(r.entity_type),
+        errorMessage: String(r.error_message),
+        payloadPreview: preview,
+        createdAt: new Date(String(r.created_at)).toISOString(),
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persisted circuit via sync_runs: open when the last `threshold` runs are failed
+ * and the newest failure is still inside cooldownMs. Survives serverless isolates.
+ */
+export async function isErpCircuitOpen(
+  orgId: string,
+  threshold = 3,
+  cooldownMs = 30_000,
+): Promise<boolean> {
+  try {
+    const runs = await getSyncRuns(orgId, threshold);
+    if (runs.length < threshold) return false;
+    const consecutiveFailed = runs.every((r) => r.status === "failed");
+    if (!consecutiveFailed) return false;
+    const newest = runs[0];
+    if (!newest) return false;
+    return Date.now() - new Date(newest.startedAt).getTime() < cooldownMs;
+  } catch {
+    return false;
+  }
+}
+

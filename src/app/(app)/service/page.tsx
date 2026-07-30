@@ -1,6 +1,6 @@
 import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
-import { getKpiBoard } from "@/application/get-ceo-home";
+import { getKpiBoard } from "@/application/get-kpi-board";
 
 export default async function ServicePage() {
   const board = await getKpiBoard({
