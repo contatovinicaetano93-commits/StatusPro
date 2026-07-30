@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CockpitShell } from "@/components/cockpit-shell";
+import { AppShell } from "@/components/shell/app-shell";
 import { readSession } from "@/infrastructure/auth/session";
 import { ROLE_LABELS } from "@/domain/roles";
 
@@ -9,8 +9,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await readSession();
   if (!session) redirect("/login");
   return (
-    <CockpitShell userName={session.name} roleLabel={ROLE_LABELS[session.role]}>
+    <AppShell userName={session.name} roleLabel={ROLE_LABELS[session.role]}>
       {children}
-    </CockpitShell>
+    </AppShell>
   );
 }
