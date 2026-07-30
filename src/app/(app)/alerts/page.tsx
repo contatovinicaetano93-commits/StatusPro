@@ -1,10 +1,7 @@
-import { getCeoHome } from "@/application/get-ceo-home";
-import { explainKpiDeviation, rankAlerts, suggestActions } from "@/ai/tools";
-import { KPI_CATALOG } from "@/domain/kpis/catalog";
+import { getAlertsBoard } from "@/application/get-alerts-board";
 
 export default async function AlertsPage() {
-  const home = await getCeoHome("daily");
-  const ranked = rankAlerts(home.alerts);
+  const board = await getAlertsBoard();
 
   return (
     <div>
@@ -12,46 +9,37 @@ export default async function AlertsPage() {
       <p className="muted">Severidade × impacto. Cada alerta traz próximo passo explícito.</p>
 
       <div style={{ display: "grid", gap: "0.85rem", marginBottom: "1.25rem" }}>
-        {ranked.map((a) => {
-          const related = home.kpis.find((k) => k.kpiId === a.kpiId);
-          const explain =
-            related && a.kpiId
-              ? explainKpiDeviation({
-                  kpiId: a.kpiId,
-                  value: related.value,
-                  target: related.target,
-                  band: related.band,
-                  relatedAlerts: [a],
-                })
-              : null;
-          return (
+        {board.rankedAlerts.length === 0 ? (
+          <p className="muted panel">Sem alertas abertos. Próximo passo: revisar metas em Config.</p>
+        ) : (
+          board.rankedAlerts.map((a) => (
             <article key={a.id} className="panel">
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <strong>{a.title}</strong>
                 <span className="muted">{a.severity}</span>
               </div>
               <p className="muted">{a.detail}</p>
-              {explain ? <p style={{ fontSize: 14 }}>{explain.summary}</p> : null}
+              {a.explanation ? <p style={{ fontSize: 14 }}>{a.explanation}</p> : null}
               <div style={{ fontSize: 14 }}>
                 <strong>Ações:</strong>
                 <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                  {suggestActions(a).map((s) => (
+                  {a.actions.map((s) => (
                     <li key={s}>{s}</li>
                   ))}
                 </ul>
               </div>
             </article>
-          );
-        })}
+          ))
+        )}
       </div>
 
       <section className="panel">
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Playbooks do catálogo</h2>
-        {KPI_CATALOG.filter((k) => k.playbook?.length).map((k) => (
+        {board.playbooks.map((k) => (
           <div key={k.id} style={{ marginBottom: "0.85rem" }}>
             <strong>{k.name}</strong>
             <ul className="muted" style={{ margin: "0.25rem 0 0", paddingLeft: "1.1rem", fontSize: 14 }}>
-              {k.playbook?.map((p) => (
+              {k.steps.map((p) => (
                 <li key={p}>{p}</li>
               ))}
             </ul>

@@ -2,12 +2,10 @@ import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
 import { AskPanel, BriefingActions } from "@/components/ask-panel";
 import { getCeoHome } from "@/application/get-ceo-home";
-import { explainKpiDeviation, rankAlerts, suggestActions } from "@/ai/tools";
 import { isFeatureEnabled } from "@/lib/env";
 
 export default async function CeoPage() {
   const home = await getCeoHome("daily");
-  const ranked = rankAlerts(home.alerts);
 
   return (
     <div>
@@ -64,43 +62,30 @@ export default async function CeoPage() {
         <section className="panel">
           <h2 style={{ margin: "0 0 0.75rem", fontSize: "1.2rem" }}>Alertas priorizados</h2>
           <div style={{ display: "grid", gap: "0.75rem" }}>
-            {ranked.length === 0 ? (
+            {home.rankedAlerts.length === 0 ? (
               <p className="muted">Sem alertas abertos. Próximo passo: validar metas do mês em Config.</p>
             ) : (
-              ranked.map((a) => {
-                const related = home.kpis.find((k) => k.kpiId === a.kpiId);
-                const explain =
-                  related && a.kpiId
-                    ? explainKpiDeviation({
-                        kpiId: a.kpiId,
-                        value: related.value,
-                        target: related.target,
-                        band: related.band,
-                        relatedAlerts: [a],
-                      })
-                    : null;
-                return (
-                  <div key={a.id} style={{ borderTop: "1px solid var(--line)", paddingTop: "0.65rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <strong>{a.title}</strong>
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        {a.severity}
-                      </span>
-                    </div>
-                    <p className="muted" style={{ margin: "0.35rem 0", fontSize: 14 }}>
-                      {a.detail}
-                    </p>
-                    {explain ? (
-                      <p style={{ margin: "0 0 0.4rem", fontSize: 13 }}>{explain.summary}</p>
-                    ) : null}
-                    <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: 13 }}>
-                      {suggestActions(a).map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
+              home.rankedAlerts.map((a) => (
+                <div key={a.id} style={{ borderTop: "1px solid var(--line)", paddingTop: "0.65rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <strong>{a.title}</strong>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {a.severity}
+                    </span>
                   </div>
-                );
-              })
+                  <p className="muted" style={{ margin: "0.35rem 0", fontSize: 14 }}>
+                    {a.detail}
+                  </p>
+                  {a.explanation ? (
+                    <p style={{ margin: "0 0 0.4rem", fontSize: 13 }}>{a.explanation}</p>
+                  ) : null}
+                  <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: 13 }}>
+                    {a.actions.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))
             )}
           </div>
         </section>
@@ -118,15 +103,7 @@ export default async function CeoPage() {
             ))}
           </ul>
         </section>
-        <AskPanel
-          kpis={home.kpis.map((k) => ({
-            kpiId: k.kpiId,
-            value: k.value,
-            target: k.target,
-            band: k.band,
-          }))}
-          alerts={home.alerts}
-        />
+        <AskPanel />
       </div>
 
       <style>{`

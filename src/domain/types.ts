@@ -49,3 +49,16 @@ export type AlertItem = {
   suggestedActions: string[];
   createdAt: string;
 };
+
+export type Freshness = {
+  asOf: string | null;
+  ageMinutes: number | null;
+  quality: KpiQuality;
+  source: string | null;
+};
+
+export type OrgContext = {
+  id: string;
+  slug: string;
+  name: string;
+};

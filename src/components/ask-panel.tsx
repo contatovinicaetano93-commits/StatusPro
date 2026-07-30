@@ -11,22 +11,7 @@ const SUGGESTIONS = [
   "Quais clientes concentram risco de caixa?",
 ];
 
-export function AskPanel({
-  kpis,
-  alerts,
-}: {
-  kpis: Array<{ kpiId: string; value: number; target?: number | null; band: string }>;
-  alerts: Array<{
-    id: string;
-    severity: "critical" | "high" | "medium" | "low";
-    title: string;
-    detail: string;
-    kpiId?: string;
-    impactBrl?: number;
-    suggestedActions: string[];
-    createdAt: string;
-  }>;
-}) {
+export function AskPanel() {
   const [answer, setAnswer] = useState<string>("");
   const [pending, start] = useTransition();
 
@@ -34,7 +19,7 @@ export function AskPanel({
     <section className="panel">
       <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.15rem" }}>Pergunte ao StatusPro</h2>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Respostas com base nos KPIs carregados — sem inventar número.
+        Respostas com KPIs/alertas carregados no servidor — sem inventar número.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {SUGGESTIONS.map((q) => (
@@ -45,7 +30,7 @@ export function AskPanel({
             disabled={pending}
             onClick={() =>
               start(async () => {
-                const text = await askStatusProAction({ question: q, kpis, alerts });
+                const text = await askStatusProAction(q);
                 setAnswer(text);
               })
             }

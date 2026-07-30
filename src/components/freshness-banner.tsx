@@ -1,4 +1,4 @@
-import type { Freshness } from "@/infrastructure/db/repositories";
+import type { Freshness } from "@/domain/types";
 
 export function FreshnessBanner({ freshness }: { freshness: Freshness }) {
   if (!freshness.asOf) {

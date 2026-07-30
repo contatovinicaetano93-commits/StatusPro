@@ -1,20 +1,21 @@
 import { getSql } from "@/infrastructure/db/client";
 import { listKpisByHorizon, withBand, getKpiDefinition } from "@/domain/kpis/engine";
-import type { AlertItem, Horizon, KpiQuality, KpiSnapshot } from "@/domain/types";
+import type { AlertItem, Freshness, Horizon, KpiQuality, KpiSnapshot, OrgContext } from "@/domain/types";
 import { logger } from "@/lib/logger";
 
-export type Freshness = {
-  asOf: string | null;
-  ageMinutes: number | null;
-  quality: KpiQuality;
-  source: string | null;
-};
+export type { Freshness, OrgContext };
 
-export type OrgContext = {
-  id: string;
-  slug: string;
-  name: string;
-};
+export async function getOrganizationById(id: string): Promise<OrgContext | null> {
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT id, slug, name FROM organizations WHERE id = ${id} LIMIT 1`;
+    if (!rows[0]) return null;
+    return { id: rows[0].id as string, slug: rows[0].slug as string, name: rows[0].name as string };
+  } catch (err) {
+    logger.warn("getOrganizationById failed", { err: String(err) });
+    return null;
+  }
+}
 
 export async function getOrganizationBySlug(slug: string): Promise<OrgContext | null> {
   try {
@@ -165,19 +166,100 @@ export async function getLatestBriefing(orgId: string) {
   }
 }
 
-export async function getSyncRuns(orgId: string, limit = 20) {
+export type SyncRunRow = {
+  id: string;
+  source: string;
+  mode: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  recordsIn: number;
+  recordsOk: number;
+  recordsError: number;
+  errorSummary: string | null;
+  latencyMs: number | null;
+};
+
+export async function getSyncRuns(orgId: string, limit = 20): Promise<SyncRunRow[]> {
   try {
     const sql = getSql();
-    return await sql`
+    const rows = await sql`
       SELECT id, source, mode, status, started_at, finished_at, records_in, records_ok, records_error, error_summary, latency_ms
       FROM sync_runs
       WHERE organization_id = ${orgId}
       ORDER BY started_at DESC
       LIMIT ${limit}
     `;
+    return rows.map((r) => ({
+      id: String(r.id),
+      source: String(r.source),
+      mode: String(r.mode),
+      status: String(r.status),
+      startedAt: new Date(String(r.started_at)).toISOString(),
+      finishedAt: r.finished_at ? new Date(String(r.finished_at)).toISOString() : null,
+      recordsIn: Number(r.records_in),
+      recordsOk: Number(r.records_ok),
+      recordsError: Number(r.records_error),
+      errorSummary: r.error_summary ? String(r.error_summary) : null,
+      latencyMs: r.latency_ms != null ? Number(r.latency_ms) : null,
+    }));
   } catch {
     return [];
   }
+}
+
+export async function insertAiBriefing(input: {
+  organizationId: string;
+  horizon: string;
+  asOfDate: string;
+  contentMd: string;
+  evidenceJson: string;
+  model: string;
+}) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO ai_briefings (organization_id, horizon, as_of_date, content_md, evidence, model)
+    VALUES (
+      ${input.organizationId},
+      ${input.horizon},
+      ${input.asOfDate},
+      ${input.contentMd},
+      ${input.evidenceJson}::jsonb,
+      ${input.model}
+    )
+  `;
+}
+
+export async function insertSyncRun(input: {
+  organizationId: string;
+  source: string;
+  mode: "incremental" | "full";
+  status: "running" | "success" | "partial" | "failed";
+  recordsIn: number;
+  recordsOk: number;
+  recordsError: number;
+  latencyMs: number;
+  errorSummary?: string | null;
+}) {
+  const sql = getSql();
+  await sql`
+    INSERT INTO sync_runs (
+      organization_id, source, mode, status, finished_at,
+      records_in, records_ok, records_error, latency_ms, error_summary
+    )
+    VALUES (
+      ${input.organizationId},
+      ${input.source},
+      ${input.mode},
+      ${input.status},
+      NOW(),
+      ${input.recordsIn},
+      ${input.recordsOk},
+      ${input.recordsError},
+      ${input.latencyMs},
+      ${input.errorSummary ?? null}
+    )
+  `;
 }
 
 export async function getStockoutSkus(orgId: string) {

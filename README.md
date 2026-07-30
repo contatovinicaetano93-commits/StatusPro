@@ -34,10 +34,12 @@ scripts/               # migrate + seed
 ```
 
 Regras:
-- UI **não** fala SQL direto
+- Páginas e actions chamam só `application/` (use-cases); **não** SQL, repos ou orquestração de IA na UI
+- Tenant vem da **sessão** (`organizationId`), não de `NEXT_PUBLIC_DEFAULT_ORG_SLUG` nas leituras
 - ERP entra só via `ErpGateway` (Zod nos boundaries)
 - Default `ERP_MODE=mock` até existir API FKN
 - IA é fail-soft: prefer `ANTHROPIC_API_KEY` (Claude); sem chave, briefing por regras continua
+- Sync atual registra run + circuit breaker; ingest completo de fatos ERP + recompute de KPIs é o próximo corte
 
 ## Domínio / KPIs
 

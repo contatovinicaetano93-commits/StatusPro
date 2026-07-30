@@ -11,13 +11,10 @@ import {
 } from "@/infrastructure/auth/session";
 import { getOrganizationBySlug } from "@/infrastructure/db/repositories";
 import { getEnv } from "@/lib/env";
-import { generateCeoBriefing } from "@/ai/tools";
-import { getCeoHome } from "@/application/get-ceo-home";
-import { getSql } from "@/infrastructure/db/client";
-import { getErpGateway } from "@/infrastructure/erp";
-import { logger } from "@/lib/logger";
 import { AuthError, requireRoles, requireSession } from "@/infrastructure/auth/guards";
 import { canRunBriefing, canRunSync, homePathForRole } from "@/domain/access";
+import { regenerateBriefing } from "@/application/regenerate-briefing";
+import { runErpSync } from "@/application/run-erp-sync";
 
 export async function loginAction(formData: FormData) {
   const env = getEnv();
@@ -69,45 +66,9 @@ export async function regenerateBriefingAction() {
     if (!canRunBriefing(session.role)) {
       return { ok: false as const, error: "Sem permissão para gerar briefing." };
     }
-
-    const home = await getCeoHome("daily");
-    if (!home.org) {
-      return { ok: false as const, error: "Org não encontrada. Rode npm run db:seed." };
-    }
-    if (home.org.id !== session.organizationId && session.role !== "admin") {
-      return { ok: false as const, error: "Org da sessão não corresponde." };
-    }
-
-    const generated = await generateCeoBriefing({
-      asOfDate: new Date().toISOString().slice(0, 10),
-      kpis: home.kpis.map((k) => ({
-        kpiId: k.kpiId,
-        value: k.value,
-        target: k.target,
-        band: k.band,
-      })),
-      alerts: home.alerts,
-    });
-
-    try {
-      const sql = getSql();
-      await sql`
-        INSERT INTO ai_briefings (organization_id, horizon, as_of_date, content_md, evidence, model)
-        VALUES (
-          ${home.org.id},
-          'daily',
-          ${generated.evidence[0]?.period ?? new Date().toISOString().slice(0, 10)},
-          ${generated.contentMd},
-          ${JSON.stringify(generated.evidence)}::jsonb,
-          ${generated.model}
-        )
-      `;
-    } catch (err) {
-      logger.warn("persist briefing failed", { err: String(err) });
-    }
-
-    revalidatePath("/ceo");
-    return { ok: true as const, contentMd: generated.contentMd, model: generated.model };
+    const result = await regenerateBriefing(session.organizationId);
+    if (result.ok) revalidatePath("/ceo");
+    return result;
   } catch (err) {
     if (err instanceof AuthError) {
       return { ok: false as const, error: err.message };
@@ -122,44 +83,12 @@ export async function runMockSyncAction() {
     if (!canRunSync(session.role)) {
       return { ok: false as const, error: "Sem permissão para sync." };
     }
-
-    const slug = getEnv().NEXT_PUBLIC_DEFAULT_ORG_SLUG;
-    const org = await getOrganizationBySlug(slug);
-    if (!org) return { ok: false as const, error: "Org ausente" };
-    if (org.id !== session.organizationId && session.role !== "admin") {
-      return { ok: false as const, error: "Org da sessão não corresponde." };
-    }
-
-    const erp = getErpGateway();
-    const started = Date.now();
-    try {
-      const health = await erp.healthcheck();
-      if (!health.ok) {
-        return { ok: false as const, error: health.detail ?? "ERP unhealthy" };
-      }
-      const pull = await erp.pullIncremental(new Date(Date.now() - 86400000));
-      const sql = getSql();
-      await sql`
-        INSERT INTO sync_runs (organization_id, source, mode, status, finished_at, records_in, records_ok, records_error, latency_ms)
-        VALUES (
-          ${org.id},
-          ${erp.sourceName},
-          'incremental',
-          'success',
-          NOW(),
-          ${pull.invoices.length},
-          ${pull.invoices.length},
-          0,
-          ${Date.now() - started}
-        )
-      `;
+    const result = await runErpSync(session.organizationId);
+    if (result.ok) {
       revalidatePath("/sync");
       revalidatePath("/ceo");
-      return { ok: true as const, records: pull.invoices.length };
-    } catch (err) {
-      logger.error("sync failed", { err: String(err) });
-      return { ok: false as const, error: String(err) };
     }
+    return result;
   } catch (err) {
     if (err instanceof AuthError) {
       return { ok: false as const, error: err.message };

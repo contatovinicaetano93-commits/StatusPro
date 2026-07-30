@@ -1,17 +1,15 @@
-import { getEnv } from "@/lib/env";
-import { getOrganizationBySlug, getSyncRuns } from "@/infrastructure/db/repositories";
+import { getSyncCenter } from "@/application/get-sync-center";
 import { SyncControls } from "@/components/sync-controls";
 
 export default async function SyncPage() {
-  const org = await getOrganizationBySlug(getEnv().NEXT_PUBLIC_DEFAULT_ORG_SLUG);
-  const runs = org ? await getSyncRuns(org.id) : [];
+  const { runs } = await getSyncCenter();
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Sync Center</h1>
       <p className="muted">
-        Integração via <code>ErpGateway</code> (mock agora; FKN/SIFWin quando houver API). Jobs
-        idempotentes com log de execução.
+        Integração via <code>ErpGateway</code> (mock agora; FKN/SIFWin quando houver API). Pipeline
+        orquestrado no use-case <code>runErpSync</code>.
       </p>
       <SyncControls />
       <section className="panel" style={{ marginTop: "1rem" }}>
@@ -32,17 +30,17 @@ export default async function SyncPage() {
             </thead>
             <tbody>
               {runs.map((r) => (
-                <tr key={String(r.id)} style={{ borderTop: "1px solid var(--line)" }}>
+                <tr key={r.id} style={{ borderTop: "1px solid var(--line)" }}>
                   <td style={{ padding: "0.5rem 0" }}>
-                    {new Date(String(r.started_at)).toLocaleString("pt-BR")}
+                    {new Date(r.startedAt).toLocaleString("pt-BR")}
                   </td>
-                  <td style={{ textAlign: "center" }}>{String(r.source)}</td>
-                  <td style={{ textAlign: "center" }}>{String(r.mode)}</td>
-                  <td style={{ textAlign: "center" }}>{String(r.status)}</td>
+                  <td style={{ textAlign: "center" }}>{r.source}</td>
+                  <td style={{ textAlign: "center" }}>{r.mode}</td>
+                  <td style={{ textAlign: "center" }}>{r.status}</td>
                   <td style={{ textAlign: "right" }}>
-                    {Number(r.records_ok)}/{Number(r.records_error)}
+                    {r.recordsOk}/{r.recordsError}
                   </td>
-                  <td style={{ textAlign: "right" }}>{r.latency_ms != null ? Number(r.latency_ms) : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{r.latencyMs != null ? r.latencyMs : "—"}</td>
                 </tr>
               ))}
             </tbody>

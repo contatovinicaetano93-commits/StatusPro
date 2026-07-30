@@ -3,27 +3,46 @@ import {
   getLatestBriefing,
   getLatestKpis,
   getOpenAlerts,
-  getOrganizationBySlug,
+  getOrganizationById,
   getStockoutSkus,
   getTopOverdueCustomers,
 } from "@/infrastructure/db/repositories";
-import type { Horizon } from "@/domain/types";
-import { getEnv } from "@/lib/env";
+import type { AlertItem, Freshness, Horizon, OrgContext } from "@/domain/types";
+import { explainKpiDeviation, rankAlerts, suggestActions } from "@/ai/tools";
+import { requireTenant } from "@/application/require-tenant";
 
-export async function getCeoHome(horizon: Horizon = "daily") {
-  const slug = getEnv().NEXT_PUBLIC_DEFAULT_ORG_SLUG;
-  const org = await getOrganizationBySlug(slug);
+export type RankedAlertView = AlertItem & {
+  explanation: string | null;
+  actions: string[];
+};
+
+export type CeoHomeView = {
+  org: OrgContext | null;
+  kpis: Awaited<ReturnType<typeof getLatestKpis>>;
+  alerts: AlertItem[];
+  rankedAlerts: RankedAlertView[];
+  briefing: Awaited<ReturnType<typeof getLatestBriefing>>;
+  freshness: Freshness;
+  stockouts: Awaited<ReturnType<typeof getStockoutSkus>>;
+  overdueCustomers: Awaited<ReturnType<typeof getTopOverdueCustomers>>;
+  checklist: Array<{ id: string; label: string; done: boolean }>;
+};
+
+export async function getCeoHome(
+  horizon: Horizon = "daily",
+  organizationId?: string,
+): Promise<CeoHomeView> {
+  let org: OrgContext | null = null;
+
+  if (organizationId) {
+    org = await getOrganizationById(organizationId);
+  } else {
+    const tenant = await requireTenant();
+    org = tenant.org;
+  }
+
   if (!org) {
-    return {
-      org: null,
-      kpis: [],
-      alerts: [],
-      briefing: null,
-      freshness: { asOf: null, ageMinutes: null, quality: "error" as const, source: null },
-      stockouts: [],
-      overdueCustomers: [],
-      checklist: defaultChecklist(),
-    };
+    return emptyHome();
   }
 
   const [kpis, alerts, briefing, freshness, stockouts, overdueCustomers] = await Promise.all([
@@ -35,15 +54,49 @@ export async function getCeoHome(horizon: Horizon = "daily") {
     getTopOverdueCustomers(org.id),
   ]);
 
+  const rankedAlerts = rankAlerts(alerts).map((a) => {
+    const related = kpis.find((k) => k.kpiId === a.kpiId);
+    const explanation =
+      related && a.kpiId
+        ? explainKpiDeviation({
+            kpiId: a.kpiId,
+            value: related.value,
+            target: related.target,
+            band: related.band,
+            relatedAlerts: [a],
+          }).summary
+        : null;
+    return {
+      ...a,
+      explanation,
+      actions: suggestActions(a),
+    };
+  });
+
   return {
     org,
     kpis,
     alerts,
+    rankedAlerts,
     briefing,
     freshness,
     stockouts,
     overdueCustomers,
     checklist: defaultChecklist(alerts.length, stockouts.length),
+  };
+}
+
+function emptyHome(): CeoHomeView {
+  return {
+    org: null,
+    kpis: [],
+    alerts: [],
+    rankedAlerts: [],
+    briefing: null,
+    freshness: { asOf: null, ageMinutes: null, quality: "error", source: null },
+    stockouts: [],
+    overdueCustomers: [],
+    checklist: defaultChecklist(),
   };
 }
 
