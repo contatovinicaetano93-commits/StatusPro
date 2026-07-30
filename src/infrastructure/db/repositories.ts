@@ -1,16 +1,29 @@
 import { getSql } from "@/infrastructure/db/client";
 import { listKpisByHorizon, withBand, getKpiDefinition } from "@/domain/kpis/engine";
+import { AlertItemSchema } from "@/domain/alerts/schemas";
 import type { AlertItem, Freshness, Horizon, KpiQuality, KpiSnapshot, OrgContext } from "@/domain/types";
 import { logger } from "@/lib/logger";
 
 export type { Freshness, OrgContext };
 
+function mapOrg(row: Record<string, unknown>): OrgContext {
+  return {
+    id: String(row.id),
+    slug: String(row.slug),
+    name: String(row.name),
+    annualRevenueTargetBrl: Number(row.annual_revenue_target_brl ?? 100_000_000),
+  };
+}
+
 export async function getOrganizationById(id: string): Promise<OrgContext | null> {
   try {
     const sql = getSql();
-    const rows = await sql`SELECT id, slug, name FROM organizations WHERE id = ${id} LIMIT 1`;
+    const rows = await sql`
+      SELECT id, slug, name, annual_revenue_target_brl
+      FROM organizations WHERE id = ${id} LIMIT 1
+    `;
     if (!rows[0]) return null;
-    return { id: rows[0].id as string, slug: rows[0].slug as string, name: rows[0].name as string };
+    return mapOrg(rows[0] as Record<string, unknown>);
   } catch (err) {
     logger.warn("getOrganizationById failed", { err: String(err) });
     return null;
@@ -20,9 +33,12 @@ export async function getOrganizationById(id: string): Promise<OrgContext | null
 export async function getOrganizationBySlug(slug: string): Promise<OrgContext | null> {
   try {
     const sql = getSql();
-    const rows = await sql`SELECT id, slug, name FROM organizations WHERE slug = ${slug} LIMIT 1`;
+    const rows = await sql`
+      SELECT id, slug, name, annual_revenue_target_brl
+      FROM organizations WHERE slug = ${slug} LIMIT 1
+    `;
     if (!rows[0]) return null;
-    return { id: rows[0].id as string, slug: rows[0].slug as string, name: rows[0].name as string };
+    return mapOrg(rows[0] as Record<string, unknown>);
   } catch (err) {
     logger.warn("getOrganizationBySlug failed", { err: String(err) });
     return null;
@@ -107,35 +123,32 @@ export async function getFreshness(orgId: string): Promise<Freshness> {
   }
 }
 
-export async function getOpenAlerts(orgId: string, limit = 8): Promise<AlertItem[]> {
+export async function getOpenAlerts(orgId: string, limit = 24): Promise<AlertItem[]> {
   try {
     const sql = getSql();
+    // Unsorted by impact; domain rankAlerts owns ordering.
     const rows = await sql`
       SELECT id, severity, title, detail, kpi_id, impact_brl, suggested_actions, created_at
       FROM alerts
       WHERE organization_id = ${orgId} AND status = 'open'
-      ORDER BY
-        CASE severity
-          WHEN 'critical' THEN 1
-          WHEN 'high' THEN 2
-          WHEN 'medium' THEN 3
-          ELSE 4
-        END,
-        created_at DESC
+      ORDER BY created_at DESC
       LIMIT ${limit}
     `;
-    return rows.map((r) => ({
-      id: String(r.id),
-      severity: r.severity as AlertItem["severity"],
-      title: String(r.title),
-      detail: String(r.detail),
-      kpiId: r.kpi_id ? String(r.kpi_id) : undefined,
-      impactBrl: r.impact_brl != null ? Number(r.impact_brl) : undefined,
-      suggestedActions: Array.isArray(r.suggested_actions)
-        ? (r.suggested_actions as string[])
-        : [],
-      createdAt: new Date(r.created_at as string).toISOString(),
-    }));
+    return rows.flatMap((r) => {
+      const parsed = AlertItemSchema.safeParse({
+        id: String(r.id),
+        severity: r.severity,
+        title: String(r.title),
+        detail: String(r.detail),
+        kpiId: r.kpi_id ? String(r.kpi_id) : undefined,
+        impactBrl: r.impact_brl != null ? Number(r.impact_brl) : undefined,
+        suggestedActions: Array.isArray(r.suggested_actions)
+          ? (r.suggested_actions as string[])
+          : [],
+        createdAt: new Date(r.created_at as string).toISOString(),
+      });
+      return parsed.success ? [parsed.data] : [];
+    });
   } catch (err) {
     logger.warn("getOpenAlerts failed", { err: String(err) });
     return [];

@@ -1,4 +1,6 @@
+import { ingestErpPull } from "@/application/ingest-erp-pull";
 import { getErpGateway } from "@/infrastructure/erp";
+import { ErpPullResultSchema } from "@/infrastructure/erp/gateway";
 import { getOrganizationById, insertSyncRun } from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
 import { CircuitBreaker } from "@/infrastructure/erp/circuit-breaker";
@@ -38,22 +40,43 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
       return { ok: false, error: health.detail ?? "ERP unhealthy" };
     }
 
-    const pull = await erp.pullIncremental(new Date(Date.now() - 86400000));
+    // Wide window so weekly/monthly KPI recompute from the pull stays realistic
+    // until we aggregate from persisted facts in SQL.
+    const rawPull = await erp.pullIncremental(new Date(Date.now() - 120 * 86400000));
+    const pull = ErpPullResultSchema.parse(rawPull);
+    const ingest = await ingestErpPull({
+      organizationId: org.id,
+      annualRevenueTargetBrl: org.annualRevenueTargetBrl,
+      pull,
+      source: erp.sourceName,
+    });
+
     const latencyMs = Date.now() - started;
-    // Ingest completo (upsert fatos + recompute KPIs) fica para o próximo corte;
-    // aqui o use-case já centraliza o pipeline e registra o sync run via repo.
+    const status =
+      ingest.recordsError === 0 ? "success" : ingest.recordsOk > 0 ? "partial" : "failed";
+
     await insertSyncRun({
       organizationId: org.id,
       source: erp.sourceName,
       mode: "incremental",
-      status: "success",
-      recordsIn: pull.invoices.length,
-      recordsOk: pull.invoices.length,
-      recordsError: 0,
+      status,
+      recordsIn: ingest.recordsIn,
+      recordsOk: ingest.recordsOk,
+      recordsError: ingest.recordsError,
       latencyMs,
+      errorSummary:
+        ingest.recordsError > 0
+          ? `${ingest.recordsError} entidades falharam no upsert`
+          : null,
     });
+
+    if (status === "failed") {
+      erpBreaker.failure();
+      return { ok: false, error: "Ingest falhou sem registros ok" };
+    }
+
     erpBreaker.success();
-    return { ok: true, records: pull.invoices.length, source: erp.sourceName, latencyMs };
+    return { ok: true, records: ingest.recordsOk, source: erp.sourceName, latencyMs };
   } catch (err) {
     erpBreaker.failure();
     logger.error("sync failed", { err: String(err) });

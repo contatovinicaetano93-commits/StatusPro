@@ -8,7 +8,8 @@ import {
   getTopOverdueCustomers,
 } from "@/infrastructure/db/repositories";
 import type { AlertItem, Freshness, Horizon, OrgContext } from "@/domain/types";
-import { explainKpiDeviation, rankAlerts, suggestActions } from "@/ai/tools";
+import { defaultSuggestedActions, rankAlerts } from "@/domain/alerts/rank";
+import { explainKpiDeviation } from "@/ai/tools";
 import { requireTenant } from "@/application/require-tenant";
 
 export type RankedAlertView = AlertItem & {
@@ -69,7 +70,7 @@ export async function getCeoHome(
     return {
       ...a,
       explanation,
-      actions: suggestActions(a),
+      actions: defaultSuggestedActions(a),
     };
   });
 

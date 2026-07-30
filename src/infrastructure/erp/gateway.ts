@@ -82,17 +82,19 @@ export type ErpOrder = z.infer<typeof ErpOrderSchema>;
 export type ErpFreight = z.infer<typeof ErpFreightSchema>;
 export type ErpPayment = z.infer<typeof ErpPaymentSchema>;
 
-export type ErpPullResult = {
-  customers: ErpCustomer[];
-  products: ErpProduct[];
-  orders: ErpOrder[];
-  invoices: ErpInvoice[];
-  receivables: ErpReceivable[];
-  payments: ErpPayment[];
-  stock: ErpStock[];
-  freight: ErpFreight[];
-  pulledAt: string;
-};
+export const ErpPullResultSchema = z.object({
+  customers: z.array(ErpCustomerSchema),
+  products: z.array(ErpProductSchema),
+  orders: z.array(ErpOrderSchema),
+  invoices: z.array(ErpInvoiceSchema),
+  receivables: z.array(ErpReceivableSchema),
+  payments: z.array(ErpPaymentSchema),
+  stock: z.array(ErpStockSchema),
+  freight: z.array(ErpFreightSchema),
+  pulledAt: z.string(),
+});
+
+export type ErpPullResult = z.infer<typeof ErpPullResultSchema>;
 
 /**
  * Boundary for FKN/SIFWin (and mocks). No UI/DB imports here.

@@ -4,7 +4,10 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { getEnv, isFeatureEnabled } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getKpiDefinition, formatKpiValue } from "@/domain/kpis/engine";
+import { defaultSuggestedActions, rankAlerts } from "@/domain/alerts/rank";
 import type { AlertItem } from "@/domain/types";
+
+export { rankAlerts, defaultSuggestedActions as suggestActions } from "@/domain/alerts/rank";
 
 export type Evidence = {
   kpiId: string;
@@ -48,20 +51,6 @@ function buildEvidence(input: BriefingInput): Evidence[] {
   });
 }
 
-export function rankAlerts(alerts: AlertItem[]): AlertItem[] {
-  const weight: Record<AlertItem["severity"], number> = {
-    critical: 100,
-    high: 70,
-    medium: 40,
-    low: 10,
-  };
-  return [...alerts].sort((a, b) => {
-    const scoreA = weight[a.severity] + (a.impactBrl ?? 0) / 100_000;
-    const scoreB = weight[b.severity] + (b.impactBrl ?? 0) / 100_000;
-    return scoreB - scoreA;
-  });
-}
-
 export function explainKpiDeviation(args: {
   kpiId: string;
   value: number;
@@ -101,15 +90,6 @@ export function explainKpiDeviation(args: {
   };
 }
 
-export function suggestActions(alert: AlertItem): string[] {
-  if (alert.suggestedActions.length) return alert.suggestedActions;
-  return [
-    "Quantificar impacto em caixa/margem",
-    "Definir owner e prazo (hoje / esta semana)",
-    "Reavaliar após próxima sync do ERP",
-  ];
-}
-
 export function ruleBasedBriefing(input: BriefingInput): {
   contentMd: string;
   evidence: Evidence[];
@@ -131,7 +111,7 @@ export function ruleBasedBriefing(input: BriefingInput): {
       : ["- Nenhum alerta crítico aberto no momento."]),
     "",
     "### O que fazer agora",
-    ...ranked.flatMap((a) => suggestActions(a).slice(0, 2).map((s) => `- ${s}`)).slice(0, 6),
+    ...ranked.flatMap((a) => defaultSuggestedActions(a).slice(0, 2).map((s) => `- ${s}`)).slice(0, 6),
     "",
     "_Gerado em modo fail-soft (regras). Se a IA generativa estiver disponível, este texto é enriquecido sem alterar os números._",
   ];

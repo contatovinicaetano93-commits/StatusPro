@@ -61,4 +61,5 @@ export type OrgContext = {
   id: string;
   slug: string;
   name: string;
+  annualRevenueTargetBrl: number;
 };

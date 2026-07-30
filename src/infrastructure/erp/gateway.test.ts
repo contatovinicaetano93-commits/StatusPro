@@ -4,6 +4,7 @@ import {
   ErpCustomerSchema,
   ErpInvoiceSchema,
   ErpProductSchema,
+  ErpPullResultSchema,
 } from "@/infrastructure/erp/gateway";
 
 describe("MockErpGateway contract", () => {
@@ -13,7 +14,8 @@ describe("MockErpGateway contract", () => {
     expect(health.ok).toBe(true);
 
     const pull = await erp.pullFull();
-    expect(pull.sourceName ?? erp.sourceName).toBeTruthy();
+    expect(erp.sourceName).toBeTruthy();
+    expect(() => ErpPullResultSchema.parse(pull)).not.toThrow();
     expect(pull.customers.length).toBeGreaterThan(10);
     expect(pull.products.length).toBeGreaterThan(5);
     expect(pull.invoices.length).toBeGreaterThan(100);

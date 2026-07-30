@@ -2,15 +2,8 @@ import path from "path";
 import { config } from "dotenv";
 import pg from "pg";
 import { MockErpGateway } from "../src/infrastructure/erp/mock-gateway";
-import {
-  cashConversionCycle,
-  dio,
-  dpo,
-  dso,
-  fillRate,
-  grossMargin,
-  otif,
-} from "../src/domain/kpis/engine";
+import { recomputeKpisFromPull } from "../src/domain/kpis/recompute";
+import { buildOperationalAlerts } from "../src/domain/alerts/build-operational";
 
 config({ path: path.resolve(process.cwd(), ".env") });
 
@@ -29,7 +22,6 @@ async function main() {
   const todayIso = today.toISOString().slice(0, 10);
   console.log(`pulled invoices=${pull.invoices.length}`);
 
-  // Keep DB lean: last 21 days of facts + all masters
   const cutoff = new Date(today);
   cutoff.setDate(today.getDate() - 21);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
@@ -84,7 +76,17 @@ async function main() {
       const row = await client.query(
         `INSERT INTO customers (organization_id, external_id, name, document, uf, region_id, segment, credit_limit_brl, is_national_account)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [orgId, c.externalId, c.name, c.document ?? null, c.uf, regionMap.get(c.uf), c.segment, c.creditLimitBrl, c.isNationalAccount],
+        [
+          orgId,
+          c.externalId,
+          c.name,
+          c.document ?? null,
+          c.uf,
+          regionMap.get(c.uf),
+          c.segment,
+          c.creditLimitBrl,
+          c.isNationalAccount,
+        ],
       );
       customerMap.set(c.externalId, row.rows[0].id);
     }
@@ -151,16 +153,28 @@ async function main() {
 
     await batchInsert(
       client,
-      `INSERT INTO payments (organization_id, customer_id, payment_date, amount_brl) VALUES`,
-      payments.map((p) => [orgId, customerMap.get(p.customerExternalId), p.paymentDate, p.amountBrl]),
-      4,
+      `INSERT INTO payments (organization_id, customer_id, payment_date, amount_brl, external_id) VALUES`,
+      payments.map((p) => [
+        orgId,
+        customerMap.get(p.customerExternalId),
+        p.paymentDate,
+        p.amountBrl,
+        `pay:${p.customerExternalId}:${p.paymentDate}:${p.amountBrl.toFixed(2)}`,
+      ]),
+      5,
     );
 
     await batchInsert(
       client,
-      `INSERT INTO freight_costs (organization_id, cost_date, uf, amount_brl) VALUES`,
-      freight.map((f) => [orgId, f.costDate, f.uf, f.amountBrl]),
-      4,
+      `INSERT INTO freight_costs (organization_id, cost_date, uf, amount_brl, external_id) VALUES`,
+      freight.map((f) => [
+        orgId,
+        f.costDate,
+        f.uf,
+        f.amountBrl,
+        `frt:${f.costDate}:${f.uf}:${f.amountBrl.toFixed(2)}:${f.orderExternalId ?? "none"}`,
+      ]),
+      5,
     );
 
     for (const s of pull.stock) {
@@ -173,82 +187,11 @@ async function main() {
       );
     }
 
-    // KPIs from full pull (annualized realism), not only 21d window
-    const dayInv = pull.invoices.filter((i) => i.invoiceDate === todayIso);
-    const revenueDay = dayInv.reduce((a, b) => a + b.netAmountBrl, 0);
-    const dayOrders = pull.orders.filter((o) => o.orderDate === todayIso);
-    const req = dayOrders.reduce((a, b) => a + b.requestedLines, 0);
-    const ful = dayOrders.reduce((a, b) => a + b.fulfilledLines, 0);
-    const otifCount = dayOrders.filter((o) => o.onTimeInFull).length;
-    const cashIn = pull.payments.filter((p) => p.paymentDate === todayIso).reduce((a, b) => a + b.amountBrl, 0);
-    const overdue = pull.receivables
-      .filter((r) => r.status === "open" && r.dueDate < todayIso)
-      .reduce((a, b) => a + b.openAmountBrl, 0);
-
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - 6);
-    const weekIso = weekStart.toISOString().slice(0, 10);
-    const weekInv = pull.invoices.filter((i) => i.invoiceDate >= weekIso);
-    const revenueWeek = weekInv.reduce((a, b) => a + b.netAmountBrl, 0);
-    const cogsWeek = weekInv.reduce((a, b) => a + b.cogsBrl, 0);
-    const freightWeek = pull.freight.filter((f) => f.costDate >= weekIso).reduce((a, b) => a + b.amountBrl, 0);
-
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-    const monthInv = pull.invoices.filter((i) => i.invoiceDate >= monthStart);
-    const revenueMonth = monthInv.reduce((a, b) => a + b.netAmountBrl, 0);
-    const cogsMonth = monthInv.reduce((a, b) => a + b.cogsBrl, 0);
-    const arOpen = pull.receivables.filter((r) => r.status === "open").reduce((a, b) => a + b.openAmountBrl, 0);
-    const last30 = new Date(today);
-    last30.setDate(today.getDate() - 29);
-    const last30Iso = last30.toISOString().slice(0, 10);
-    const rev30 = pull.invoices.filter((i) => i.invoiceDate >= last30Iso).reduce((a, b) => a + b.netAmountBrl, 0);
-    const cogs30 = pull.invoices.filter((i) => i.invoiceDate >= last30Iso).reduce((a, b) => a + b.cogsBrl, 0);
-    const invValue = pull.stock.reduce((a, s) => {
-      const p = pull.products.find((x) => x.sku === s.sku);
-      return a + s.onHand * (p?.unitCostBrl ?? 0);
-    }, 0);
-    const stockouts = pull.stock.filter((s) => {
-      const p = pull.products.find((x) => x.sku === s.sku);
-      return p?.abcClass === "A" && s.onHand < (p?.minStock ?? 0);
-    }).length;
-
-    const dsoV = dso(arOpen, rev30);
-    const dioV = dio(invValue, cogs30);
-    const dpoV = dpo(cogs30 * 0.55, cogs30);
-    const ccc = cashConversionCycle(dsoV, dioV, dpoV);
-    const topCustomers = new Map<string, number>();
-    for (const inv of monthInv) {
-      topCustomers.set(inv.customerExternalId, (topCustomers.get(inv.customerExternalId) ?? 0) + inv.netAmountBrl);
-    }
-    const top10 = [...topCustomers.values()].sort((a, b) => b - a).slice(0, 10).reduce((a, b) => a + b, 0);
-    const concentration = revenueMonth > 0 ? top10 / revenueMonth : 0;
-
-    const dailyTarget = 100_000_000 / 365;
-    const weeklyTarget = dailyTarget * 7;
-    const monthlyTarget = 100_000_000 / 12;
-
-    const snapshots: Array<{ kpiId: string; horizon: string; value: number; target?: number }> = [
-      { kpiId: "revenue_day", horizon: "daily", value: revenueDay, target: dailyTarget },
-      { kpiId: "fill_rate_day", horizon: "daily", value: fillRate(ful, req) },
-      { kpiId: "otif_day", horizon: "daily", value: otif(otifCount, dayOrders.length || 1) },
-      { kpiId: "cash_in_day", horizon: "daily", value: cashIn, target: dailyTarget * 0.9 },
-      { kpiId: "overdue_ar", horizon: "daily", value: overdue },
-      { kpiId: "stockout_sku_a", horizon: "daily", value: stockouts },
-      { kpiId: "returns_day", horizon: "daily", value: revenueDay * 0.012 },
-      { kpiId: "revenue_week", horizon: "weekly", value: revenueWeek, target: weeklyTarget },
-      { kpiId: "gross_margin_week", horizon: "weekly", value: grossMargin(revenueWeek, cogsWeek) },
-      { kpiId: "freight_pct_week", horizon: "weekly", value: revenueWeek > 0 ? freightWeek / revenueWeek : 0 },
-      { kpiId: "ar_aging_60", horizon: "weekly", value: overdue * 0.45 },
-      { kpiId: "revenue_month", horizon: "monthly", value: revenueMonth, target: monthlyTarget },
-      { kpiId: "gross_margin_month", horizon: "monthly", value: grossMargin(revenueMonth, cogsMonth) },
-      { kpiId: "dso", horizon: "monthly", value: dsoV },
-      { kpiId: "dio", horizon: "monthly", value: dioV },
-      { kpiId: "dpo", horizon: "monthly", value: dpoV },
-      { kpiId: "cash_conversion_cycle", horizon: "monthly", value: ccc },
-      { kpiId: "top10_concentration", horizon: "monthly", value: concentration },
-      { kpiId: "revenue_quarter", horizon: "quarterly", value: revenueMonth * 3 * 0.95, target: monthlyTarget * 3 },
-      { kpiId: "ebitda_proxy_quarter", horizon: "quarterly", value: revenueMonth * 3 * 0.95 * 0.12, target: monthlyTarget * 3 * 0.12 },
-    ];
+    const { snapshots, metrics } = recomputeKpisFromPull(pull, {
+      asOfDate: todayIso,
+      annualRevenueTargetBrl: 100_000_000,
+      source: "mock:sifwin",
+    });
 
     for (const s of snapshots) {
       await client.query(
@@ -258,46 +201,20 @@ async function main() {
       );
     }
 
-    const alerts = [
-      {
-        severity: "critical",
-        title: "Ruptura em SKUs A",
-        detail: `${stockouts} SKUs classe A abaixo do mínimo no CD-SP.`,
-        kpi_id: "stockout_sku_a",
-        impact: stockouts * 85_000,
-        actions: ["Emitir OC emergencial", "Realocar estoque interestadual", "Oferecer substituto aos pedidos abertos"],
-      },
-      {
-        severity: "high",
-        title: "Inadimplência acima do limiar",
-        detail: `Recebíveis vencidos em R$ ${overdue.toFixed(0)}.`,
-        kpi_id: "overdue_ar",
-        impact: overdue * 0.08,
-        actions: ["Cobrar top 10 por valor", "Acionar jurídico >90d", "Revisar limite de crédito"],
-      },
-      {
-        severity: "high",
-        title: "Fill rate sob pressão",
-        detail: `Fill rate do dia em ${(fillRate(ful, req) * 100).toFixed(1)}%.`,
-        kpi_id: "fill_rate_day",
-        impact: revenueDay * 0.05,
-        actions: ["Priorizar picking SKU A", "Congelar promoções de itens críticos"],
-      },
-      {
-        severity: "medium",
-        title: "Frete elevado em algumas UFs",
-        detail: `Frete da semana em ${((freightWeek / Math.max(revenueWeek, 1)) * 100).toFixed(1)}% da receita.`,
-        kpi_id: "freight_pct_week",
-        impact: freightWeek * 0.15,
-        actions: ["Revisar tabela frete BA/PE", "Consolidar cargas semanais Nordeste"],
-      },
-    ];
-
+    const alerts = buildOperationalAlerts(metrics);
     for (const a of alerts) {
       await client.query(
         `INSERT INTO alerts (organization_id, severity, title, detail, kpi_id, impact_brl, suggested_actions)
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-        [orgId, a.severity, a.title, a.detail, a.kpi_id, a.impact, JSON.stringify(a.actions)],
+        [
+          orgId,
+          a.severity,
+          a.title,
+          a.detail,
+          a.kpiId ?? null,
+          a.impactBrl ?? null,
+          JSON.stringify(a.suggestedActions),
+        ],
       );
     }
 
@@ -316,9 +233,9 @@ async function main() {
         [
           "## Briefing do dia",
           "",
-          `- Faturamento do dia: R$ ${revenueDay.toFixed(0)} (meta diária ~R$ ${dailyTarget.toFixed(0)}).`,
-          `- Fill rate: ${(fillRate(ful, req) * 100).toFixed(1)}% — ${stockouts} SKUs A em risco.`,
-          `- Caixa recebido: R$ ${cashIn.toFixed(0)}; vencidos: R$ ${overdue.toFixed(0)}.`,
+          `- Faturamento do dia: R$ ${metrics.revenueDay.toFixed(0)}.`,
+          `- Fill rate: ${(metrics.fillRateDay * 100).toFixed(1)}% — ${metrics.stockoutSkuA} SKUs A em risco.`,
+          `- Caixa recebido: R$ ${metrics.cashInDay.toFixed(0)}; vencidos: R$ ${metrics.overdueAr.toFixed(0)}.`,
           "",
           "### Prioridades",
           "1. Reposição emergencial dos SKUs A em ruptura.",
@@ -326,16 +243,18 @@ async function main() {
           "3. Proteger OTIF das contas nacionais com pedidos liberados.",
         ].join("\n"),
         JSON.stringify([
-          { kpiId: "revenue_day", value: revenueDay },
-          { kpiId: "fill_rate_day", value: fillRate(ful, req) },
-          { kpiId: "overdue_ar", value: overdue },
-          { kpiId: "stockout_sku_a", value: stockouts },
+          { kpiId: "revenue_day", value: metrics.revenueDay },
+          { kpiId: "fill_rate_day", value: metrics.fillRateDay },
+          { kpiId: "overdue_ar", value: metrics.overdueAr },
+          { kpiId: "stockout_sku_a", value: metrics.stockoutSkuA },
         ]),
       ],
     );
 
     await client.query("COMMIT");
-    console.log(`seed ok org=${orgId} invoicesStored=${invoices.length} revenueDay=${revenueDay.toFixed(0)}`);
+    console.log(
+      `seed ok org=${orgId} invoicesStored=${invoices.length} revenueDay=${metrics.revenueDay.toFixed(0)}`,
+    );
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
