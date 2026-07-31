@@ -275,15 +275,21 @@ export async function insertSyncRun(input: {
 export async function getStockoutSkus(orgId: string) {
   try {
     const sql = getSql();
+    // Latest snapshot per SKU — same contract as loadRecomputePullFromDb / stockout_sku_a.
     return await sql`
-      SELECT p.sku, p.name, p.family, p.abc_class, p.min_stock, s.on_hand, w.code AS warehouse
-      FROM stock_snapshots s
-      JOIN products p ON p.id = s.product_id
-      JOIN warehouses w ON w.id = s.warehouse_id
-      WHERE s.organization_id = ${orgId}
-        AND p.abc_class = 'A'
-        AND s.on_hand < p.min_stock
-      ORDER BY (p.min_stock - s.on_hand) DESC
+      SELECT p.sku, p.name, p.family, p.abc_class, p.min_stock, latest.on_hand, w.code AS warehouse
+      FROM (
+        SELECT DISTINCT ON (s.product_id)
+          s.product_id, s.warehouse_id, s.on_hand, s.as_of_date
+        FROM stock_snapshots s
+        WHERE s.organization_id = ${orgId}
+        ORDER BY s.product_id, s.as_of_date DESC
+      ) latest
+      JOIN products p ON p.id = latest.product_id
+      JOIN warehouses w ON w.id = latest.warehouse_id
+      WHERE p.abc_class = 'A'
+        AND latest.on_hand < p.min_stock
+      ORDER BY (p.min_stock - latest.on_hand) DESC
       LIMIT 20
     `;
   } catch {

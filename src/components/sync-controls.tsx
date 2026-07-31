@@ -9,6 +9,7 @@ import {
 } from "@/app/actions";
 
 export function SyncControls({ circuitOpen }: { circuitOpen: boolean }) {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState("");
   return (
@@ -40,6 +41,7 @@ export function SyncControls({ circuitOpen }: { circuitOpen: boolean }) {
           start(async () => {
             const res = await runMockSyncAction();
             setMsg(res.ok ? `Sync ok — ${res.records} registros` : res.error);
+            router.refresh();
           })
         }
       >

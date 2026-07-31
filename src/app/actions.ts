@@ -56,10 +56,9 @@ export async function regenerateBriefingAction() {
 export async function runMockSyncAction() {
   try {
     const result = await runErpSyncForSession();
-    if (result.ok) {
-      revalidatePath("/sync");
-      revalidatePath("/ceo");
-    }
+    // Always refresh Sync Center (failed runs feed circuit + history).
+    revalidatePath("/sync");
+    if (result.ok) revalidatePath("/ceo");
     return result;
   } catch (err) {
     const msg = asAuthFailure(err);
