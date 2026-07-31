@@ -11,6 +11,11 @@ const rawSchema = z.object({
   NEXT_PUBLIC_APP_NAME: z.string().default("StatusPro"),
   ALLOW_DEMO_AUTH: z.string().optional(),
   ERP_MODE: z.enum(["mock", "fkn"]).optional().default("mock"),
+  ERP_FKN_BASE_URL: z.string().optional().default(""),
+  ERP_FKN_API_KEY: z.string().optional().default(""),
+  ERP_FKN_HEALTH_PATH: z.string().optional().default("/health"),
+  ERP_FKN_PULL_PATH: z.string().optional().default("/api/v1/pull"),
+  ERP_FKN_TIMEOUT_MS: z.string().optional().default("30000"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
@@ -24,6 +29,11 @@ export type AppEnv = {
   NEXT_PUBLIC_APP_NAME: string;
   ALLOW_DEMO_AUTH: boolean;
   ERP_MODE: "mock" | "fkn";
+  ERP_FKN_BASE_URL: string;
+  ERP_FKN_API_KEY: string;
+  ERP_FKN_HEALTH_PATH: string;
+  ERP_FKN_PULL_PATH: string;
+  ERP_FKN_TIMEOUT_MS: number;
   NODE_ENV: "development" | "test" | "production";
 };
 
@@ -41,6 +51,11 @@ export function getEnv(): AppEnv {
     NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
     ALLOW_DEMO_AUTH: process.env.ALLOW_DEMO_AUTH,
     ERP_MODE: process.env.ERP_MODE,
+    ERP_FKN_BASE_URL: process.env.ERP_FKN_BASE_URL,
+    ERP_FKN_API_KEY: process.env.ERP_FKN_API_KEY,
+    ERP_FKN_HEALTH_PATH: process.env.ERP_FKN_HEALTH_PATH,
+    ERP_FKN_PULL_PATH: process.env.ERP_FKN_PULL_PATH,
+    ERP_FKN_TIMEOUT_MS: process.env.ERP_FKN_TIMEOUT_MS,
     NODE_ENV: process.env.NODE_ENV,
   });
   if (!parsed.success) {
@@ -65,6 +80,9 @@ export function getEnv(): AppEnv {
   const denyDemoExplicit = raw.ALLOW_DEMO_AUTH === "false" || raw.ALLOW_DEMO_AUTH === "0";
   const allowDemoAuth = denyDemoExplicit ? false : isProd ? allowDemoExplicit : true;
 
+  const timeoutMs = Number(raw.ERP_FKN_TIMEOUT_MS);
+  const erpTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30_000;
+
   cached = {
     DATABASE_URL: raw.DATABASE_URL,
     AUTH_SECRET: authSecret,
@@ -75,12 +93,27 @@ export function getEnv(): AppEnv {
     NEXT_PUBLIC_APP_NAME: raw.NEXT_PUBLIC_APP_NAME,
     ALLOW_DEMO_AUTH: allowDemoAuth,
     ERP_MODE: raw.ERP_MODE ?? "mock",
+    ERP_FKN_BASE_URL: (raw.ERP_FKN_BASE_URL ?? "").trim().replace(/\/$/, ""),
+    ERP_FKN_API_KEY: (raw.ERP_FKN_API_KEY ?? "").trim(),
+    ERP_FKN_HEALTH_PATH: normalizePath(raw.ERP_FKN_HEALTH_PATH ?? "/health"),
+    ERP_FKN_PULL_PATH: normalizePath(raw.ERP_FKN_PULL_PATH ?? "/api/v1/pull"),
+    ERP_FKN_TIMEOUT_MS: erpTimeoutMs,
     NODE_ENV: raw.NODE_ENV,
   };
   return cached;
 }
 
+function normalizePath(path: string): string {
+  const trimmed = path.trim() || "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
 export function isFeatureEnabled(flag: string): boolean {
   const flags = getEnv().FEATURE_FLAGS.split(",").map((f) => f.trim()).filter(Boolean);
   return flags.includes(flag);
+}
+
+/** Test helper — clears env singleton between cases. */
+export function resetEnvCache(): void {
+  cached = null;
 }

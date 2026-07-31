@@ -222,26 +222,3 @@ export class MockErpGateway implements ErpGateway {
   }
 }
 
-/**
- * Stub for real FKN/SIFWin API — throws until credentials/docs are provided.
- * Wire HTTP client here when FKN releases API access.
- */
-export class FknSifwinErpGateway implements ErpGateway {
-  readonly sourceName = "fkn:sifwin";
-
-  async healthcheck() {
-    return {
-      ok: false,
-      latencyMs: 0,
-      detail: "FKN/SIFWin API credentials not configured. Use MockErpGateway until suporte@fkn.com.br provides API docs.",
-    };
-  }
-
-  async pullFull(): Promise<ErpPullResult> {
-    throw new Error("FknSifwinErpGateway not configured");
-  }
-
-  async pullIncremental(): Promise<ErpPullResult> {
-    throw new Error("FknSifwinErpGateway not configured");
-  }
-}

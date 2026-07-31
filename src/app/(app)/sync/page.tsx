@@ -98,14 +98,16 @@ export default async function SyncPage() {
         <ol className="muted" style={{ margin: 0, paddingLeft: "1.2rem", lineHeight: 1.6 }}>
           <li>Obter docs/API com suporte FKN</li>
           <li>
-            Implementar métodos em <code>FknSifwinErpGateway</code>
+            Setar <code>ERP_MODE=fkn</code>, <code>ERP_FKN_BASE_URL</code>, <code>ERP_FKN_API_KEY</code>
           </li>
           <li>
-            Validar payloads com Zod schemas em <code>gateway.ts</code>
+            Ajustar paths/auth em <code>fkn-http.ts</code> / <code>fkn-sifwin-gateway.ts</code> se
+            necessário
           </li>
           <li>
-            Setar <code>ERP_MODE=fkn</code> e credenciais
+            Completar mapper em <code>fkn-map.ts</code> (Zod em <code>gateway.ts</code>)
           </li>
+          <li>Rodar sync aqui e conferir dead letters / circuit</li>
         </ol>
       </section>
     </div>

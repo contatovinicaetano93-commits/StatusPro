@@ -53,11 +53,16 @@ Horizontes: Diário → Semanal → Mensal → Trimestral.
 
 ## Sync FKN/SIFWin
 
-1. Pedir API ao suporte FKN
-2. Implementar `FknSifwinErpGateway` em `src/infrastructure/erp/mock-gateway.ts`
-3. Validar com schemas Zod de `gateway.ts`
-4. `ERP_MODE=fkn` + credenciais
-5. Acompanhar no **Sync Center**
+1. Pedir API/docs ao suporte FKN (`suporte@fkn.com.br`)
+2. Preencher no `.env` / Vercel:
+   - `ERP_MODE=fkn`
+   - `ERP_FKN_BASE_URL`, `ERP_FKN_API_KEY`
+   - opcional: `ERP_FKN_HEALTH_PATH`, `ERP_FKN_PULL_PATH`, `ERP_FKN_TIMEOUT_MS`
+3. Ajustar auth/headers em `src/infrastructure/erp/fkn-http.ts` se o vendor não usar Bearer
+4. Mapear payload vendor → `ErpPullResult` em `src/infrastructure/erp/fkn-map.ts` (hoje aceita JSON já no shape StatusPro ou `{ data: … }`)
+5. Validar no **Sync Center** (health + sync incremental)
+
+Gateway: `FknSifwinErpGateway` em `src/infrastructure/erp/fkn-sifwin-gateway.ts`.
 
 ## Feature flags
 
