@@ -9,6 +9,7 @@ import {
   ErpStockSchema,
   type ErpPullResult,
 } from "@/infrastructure/erp/gateway";
+import { OPERATIONAL_ALERT_KPI_IDS } from "@/domain/alerts/build-operational";
 import type { OperationalAlertDraft } from "@/domain/alerts/schemas";
 import type { RecomputePull, RecomputeSnapshot } from "@/domain/kpis/recompute";
 import { logger } from "@/lib/logger";
@@ -761,17 +762,15 @@ export async function replaceOpenOperationalAlerts(args: {
   alerts: OperationalAlertDraft[];
 }): Promise<void> {
   const sql = getSql();
-  const kpiIds = args.alerts.map((a) => a.kpiId).filter((id): id is string => Boolean(id));
-
-  if (kpiIds.length) {
-    await sql`
-      UPDATE alerts
-      SET status = 'resolved'
-      WHERE organization_id = ${args.organizationId}
-        AND status = 'open'
-        AND kpi_id = ANY(${kpiIds})
-    `;
-  }
+  // Always clear the managed set so green KPIs do not leave stale open alerts.
+  const managedIds = [...OPERATIONAL_ALERT_KPI_IDS];
+  await sql`
+    UPDATE alerts
+    SET status = 'resolved'
+    WHERE organization_id = ${args.organizationId}
+      AND status = 'open'
+      AND kpi_id = ANY(${managedIds})
+  `;
 
   for (const a of args.alerts) {
     await sql`

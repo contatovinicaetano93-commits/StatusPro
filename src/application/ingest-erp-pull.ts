@@ -1,15 +1,11 @@
-import { buildOperationalAlerts } from "@/domain/alerts/build-operational";
-import { recomputeKpisFromPull } from "@/domain/kpis/recompute";
 import {
   countPullRecords,
-  insertKpiSnapshots,
-  loadRecomputePullFromDb,
-  replaceOpenOperationalAlerts,
   slimPullForPersist,
   upsertErpFacts,
   upsertErpMasters,
 } from "@/infrastructure/db/erp-ingest";
 import type { ErpPullResult } from "@/infrastructure/erp/gateway";
+import { recomputeOrgFromDb } from "@/application/recompute-org-from-db";
 import { logger } from "@/lib/logger";
 
 export type IngestErpPullResult = {
@@ -28,7 +24,6 @@ export async function ingestErpPull(args: {
   asOfDate?: string;
 }): Promise<IngestErpPullResult> {
   const recordsIn = countPullRecords(args.pull);
-  const asOfDate = args.asOfDate ?? new Date().toISOString().slice(0, 10);
   const persistPull = slimPullForPersist(args.pull);
 
   const masters = await upsertErpMasters(args.organizationId, persistPull);
@@ -40,26 +35,12 @@ export async function ingestErpPull(args: {
     warehouseId: masters.warehouseId,
   });
 
-  // Production path: recompute from persisted facts (not the in-memory pull).
-  const dbPull = await loadRecomputePullFromDb(args.organizationId);
-  const recompute = recomputeKpisFromPull(dbPull, {
-    asOfDate,
+  const recomputed = await recomputeOrgFromDb({
+    organizationId: args.organizationId,
     annualRevenueTargetBrl: args.annualRevenueTargetBrl,
     source: args.source,
     quality: facts.error > 0 ? "partial" : "ok",
-  });
-
-  await insertKpiSnapshots({
-    organizationId: args.organizationId,
-    source: args.source,
-    snapshots: recompute.snapshots,
-    quality: facts.error > 0 ? "partial" : "ok",
-  });
-
-  const alerts = buildOperationalAlerts(recompute.metrics);
-  await replaceOpenOperationalAlerts({
-    organizationId: args.organizationId,
-    alerts,
+    asOfDate: args.asOfDate,
   });
 
   const recordsOk = masters.counts.ok + facts.ok;
@@ -70,8 +51,8 @@ export async function ingestErpPull(args: {
     recordsIn,
     recordsOk,
     recordsError,
-    kpiCount: recompute.snapshots.length,
-    alertCount: alerts.length,
+    kpiCount: recomputed.kpiCount,
+    alertCount: recomputed.alertCount,
     recomputeSource: "db",
   });
 
@@ -79,7 +60,7 @@ export async function ingestErpPull(args: {
     recordsIn,
     recordsOk,
     recordsError,
-    kpiCount: recompute.snapshots.length,
-    alertCount: alerts.length,
+    kpiCount: recomputed.kpiCount,
+    alertCount: recomputed.alertCount,
   };
 }

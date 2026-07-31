@@ -1,10 +1,12 @@
 import { requireRoles } from "@/infrastructure/auth/guards";
 import { canRunSync } from "@/domain/access";
 import {
+  getOrganizationById,
   getSyncDeadLetter,
   markSyncDeadLetterReprocessed,
 } from "@/infrastructure/db/repositories";
 import { retryDeadLetterUpsert } from "@/infrastructure/db/erp-ingest";
+import { recomputeOrgFromDb } from "@/application/recompute-org-from-db";
 
 export type DeadLetterActionResult =
   | { ok: true }
@@ -31,6 +33,9 @@ export async function retrySyncDeadLetter(deadLetterId: string): Promise<DeadLet
   const id = deadLetterId.trim();
   if (!id) return { ok: false, error: "Dead letter inválida." };
 
+  const org = await getOrganizationById(session.organizationId);
+  if (!org) return { ok: false, error: "Org ausente." };
+
   const row = await getSyncDeadLetter(session.organizationId, id);
   if (!row) return { ok: false, error: "Dead letter não encontrada ou já processada." };
 
@@ -43,5 +48,13 @@ export async function retrySyncDeadLetter(deadLetterId: string): Promise<DeadLet
 
   const marked = await markSyncDeadLetterReprocessed(session.organizationId, id);
   if (!marked) return { ok: false, error: "Upsert ok, mas falhou ao marcar reprocessed_at." };
+
+  await recomputeOrgFromDb({
+    organizationId: org.id,
+    annualRevenueTargetBrl: org.annualRevenueTargetBrl,
+    source: "dead_letter_retry",
+    quality: "ok",
+  });
+
   return { ok: true };
 }

@@ -83,7 +83,11 @@ export async function ackDeadLetterAction(deadLetterId: string) {
 export async function retryDeadLetterAction(deadLetterId: string) {
   try {
     const result = await retrySyncDeadLetter(deadLetterId);
-    if (result.ok) revalidatePath("/sync");
+    if (result.ok) {
+      revalidatePath("/sync");
+      revalidatePath("/ceo");
+      revalidatePath("/alerts");
+    }
     return result;
   } catch (err) {
     const msg = asAuthFailure(err);
