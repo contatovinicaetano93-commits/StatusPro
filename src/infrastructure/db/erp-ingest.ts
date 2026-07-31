@@ -6,6 +6,7 @@ import {
   ErpOrderSchema,
   ErpPaymentSchema,
   ErpReceivableSchema,
+  ErpStockSchema,
   type ErpPullResult,
 } from "@/infrastructure/erp/gateway";
 import type { OperationalAlertDraft } from "@/domain/alerts/schemas";
@@ -47,7 +48,35 @@ async function resolveCustomerId(
   return rows.rows[0] ? String(rows.rows[0].id) : null;
 }
 
-type RetryEntityType = "sales_order" | "invoice" | "receivable" | "payment";
+async function resolveProductId(
+  client: pg.Client,
+  organizationId: string,
+  sku: string,
+): Promise<string | null> {
+  const rows = await client.query(
+    `SELECT id FROM products
+     WHERE organization_id = $1 AND sku = $2
+     LIMIT 1`,
+    [organizationId, sku],
+  );
+  return rows.rows[0] ? String(rows.rows[0].id) : null;
+}
+
+async function resolveWarehouseId(
+  client: pg.Client,
+  organizationId: string,
+  warehouseCode: string,
+): Promise<string | null> {
+  const rows = await client.query(
+    `SELECT id FROM warehouses
+     WHERE organization_id = $1 AND code = $2
+     LIMIT 1`,
+    [organizationId, warehouseCode],
+  );
+  return rows.rows[0] ? String(rows.rows[0].id) : null;
+}
+
+type RetryEntityType = "sales_order" | "invoice" | "receivable" | "payment" | "stock";
 
 function asRetryEntityType(entityType: string): RetryEntityType | null {
   switch (entityType) {
@@ -55,13 +84,14 @@ function asRetryEntityType(entityType: string): RetryEntityType | null {
     case "invoice":
     case "receivable":
     case "payment":
+    case "stock":
       return entityType;
     default:
       return null;
   }
 }
 
-/** Retry a single open dead-letter payload (orders / invoices / receivables / payments). */
+/** Retry a single open dead-letter payload (orders / invoices / receivables / payments / stock). */
 export async function retryDeadLetterUpsert(args: {
   organizationId: string;
   entityType: string;
@@ -205,6 +235,32 @@ export async function retryDeadLetterUpsert(args: {
                 p.amountBrl,
                 paymentExternalId(p),
               ],
+            );
+            break;
+          }
+          case "stock": {
+            const s = ErpStockSchema.parse(payload);
+            const productId = await resolveProductId(client, organizationId, s.sku);
+            if (!productId) {
+              softError = `product missing: ${s.sku}`;
+              break;
+            }
+            const warehouseId = await resolveWarehouseId(
+              client,
+              organizationId,
+              s.warehouseCode,
+            );
+            if (!warehouseId) {
+              softError = `warehouse missing: ${s.warehouseCode}`;
+              break;
+            }
+            await client.query(
+              `INSERT INTO stock_snapshots (
+                 organization_id, warehouse_id, product_id, as_of_date, on_hand
+               ) VALUES ($1,$2,$3,$4,$5)
+               ON CONFLICT (organization_id, warehouse_id, product_id, as_of_date)
+               DO UPDATE SET on_hand = EXCLUDED.on_hand`,
+              [organizationId, warehouseId, productId, s.asOfDate, s.onHand],
             );
             break;
           }
@@ -633,7 +689,14 @@ export async function upsertErpFacts(args: {
         const stockRows = pull.stock
           .map((s) => {
             const productId = productMap.get(s.sku);
-            if (!productId) return null;
+            if (!productId) {
+              deadLetters.push({
+                entityType: "stock",
+                payload: s,
+                errorMessage: `product missing: ${s.sku}`,
+              });
+              return null;
+            }
             return [organizationId, warehouseId, productId, s.asOfDate, s.onHand];
           })
           .filter((r): r is NonNullable<typeof r> => r != null);

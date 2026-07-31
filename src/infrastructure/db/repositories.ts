@@ -193,32 +193,29 @@ export type SyncRunRow = {
   latencyMs: number | null;
 };
 
+/** Throws on DB failure so callers (e.g. circuit) can fail-closed. */
 export async function getSyncRuns(orgId: string, limit = 20): Promise<SyncRunRow[]> {
-  try {
-    const sql = getSql();
-    const rows = await sql`
-      SELECT id, source, mode, status, started_at, finished_at, records_in, records_ok, records_error, error_summary, latency_ms
-      FROM sync_runs
-      WHERE organization_id = ${orgId}
-      ORDER BY started_at DESC
-      LIMIT ${limit}
-    `;
-    return rows.map((r) => ({
-      id: String(r.id),
-      source: String(r.source),
-      mode: String(r.mode),
-      status: String(r.status),
-      startedAt: new Date(String(r.started_at)).toISOString(),
-      finishedAt: r.finished_at ? new Date(String(r.finished_at)).toISOString() : null,
-      recordsIn: Number(r.records_in),
-      recordsOk: Number(r.records_ok),
-      recordsError: Number(r.records_error),
-      errorSummary: r.error_summary ? String(r.error_summary) : null,
-      latencyMs: r.latency_ms != null ? Number(r.latency_ms) : null,
-    }));
-  } catch {
-    return [];
-  }
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, source, mode, status, started_at, finished_at, records_in, records_ok, records_error, error_summary, latency_ms
+    FROM sync_runs
+    WHERE organization_id = ${orgId}
+    ORDER BY started_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => ({
+    id: String(r.id),
+    source: String(r.source),
+    mode: String(r.mode),
+    status: String(r.status),
+    startedAt: new Date(String(r.started_at)).toISOString(),
+    finishedAt: r.finished_at ? new Date(String(r.finished_at)).toISOString() : null,
+    recordsIn: Number(r.records_in),
+    recordsOk: Number(r.records_ok),
+    recordsError: Number(r.records_error),
+    errorSummary: r.error_summary ? String(r.error_summary) : null,
+    latencyMs: r.latency_ms != null ? Number(r.latency_ms) : null,
+  }));
 }
 
 export async function insertAiBriefing(input: {
@@ -446,6 +443,21 @@ export async function markSyncDeadLetterReprocessed(
 /** Default cooldown: 5 minutes after a streak of consecutive failures. */
 export const ERP_CIRCUIT_COOLDOWN_MS = 5 * 60_000;
 
+/** Pure circuit evaluation — used by isErpCircuitOpen and unit tests. */
+export function evaluateErpCircuit(
+  runs: SyncRunRow[],
+  threshold: number,
+  cooldownMs: number,
+  nowMs: number,
+): boolean {
+  if (runs.length < threshold) return false;
+  const consecutiveFailed = runs.every((r) => r.status === "failed");
+  if (!consecutiveFailed) return false;
+  const newest = runs[0];
+  if (!newest) return false;
+  return nowMs - new Date(newest.startedAt).getTime() < cooldownMs;
+}
+
 /**
  * Persisted circuit via sync_runs: open when the last `threshold` runs are failed
  * and the newest failure is still inside cooldownMs. Survives serverless isolates.
@@ -458,12 +470,7 @@ export async function isErpCircuitOpen(
 ): Promise<boolean> {
   try {
     const runs = await getSyncRuns(orgId, threshold);
-    if (runs.length < threshold) return false;
-    const consecutiveFailed = runs.every((r) => r.status === "failed");
-    if (!consecutiveFailed) return false;
-    const newest = runs[0];
-    if (!newest) return false;
-    return Date.now() - new Date(newest.startedAt).getTime() < cooldownMs;
+    return evaluateErpCircuit(runs, threshold, cooldownMs, Date.now());
   } catch {
     return true;
   }

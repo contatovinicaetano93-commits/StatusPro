@@ -3,8 +3,7 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import { ROLES, type Role } from "@/domain/roles";
 import { canAccessPath, homePathForRole } from "@/domain/access";
-
-const AUTH_COOKIE = "statuspro_session";
+import { AUTH_COOKIE, resolveAuthSecret } from "@/lib/auth-secret";
 
 const PUBLIC_PATHS = ["/login"];
 
@@ -51,8 +50,12 @@ export async function middleware(request: NextRequest) {
 }
 
 async function verifyToken(token: string): Promise<{ role: Role } | null> {
+  const secret = resolveAuthSecret();
+  if (!secret) {
+    // Fail-closed: never verify with a hard-coded production fallback.
+    return null;
+  }
   try {
-    const secret = process.env.AUTH_SECRET || "statuspro-dev-secret-change-me";
     const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
     const role = String(payload.role);
     if (!ROLES.includes(role as Role)) return null;

@@ -1,10 +1,11 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { getEnv } from "@/lib/env";
+import { AUTH_COOKIE } from "@/lib/auth-secret";
 import type { Role } from "@/domain/roles";
 import { ROLES } from "@/domain/roles";
 
-export const AUTH_COOKIE = "statuspro_session";
+export { AUTH_COOKIE };
 
 export type SessionUser = {
   id: string;

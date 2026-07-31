@@ -17,10 +17,10 @@ export type SyncCenterView = {
 
 export async function getSyncCenter(): Promise<SyncCenterView> {
   const { org } = await requireTenant();
-  const [runs, deadLetters, circuitOpen] = await Promise.all([
-    getSyncRuns(org.id),
+  const [runsResult, deadLetters, circuitOpen] = await Promise.all([
+    getSyncRuns(org.id).catch(() => [] as Awaited<ReturnType<typeof getSyncRuns>>),
     listSyncDeadLetters(org.id),
     isErpCircuitOpen(org.id),
   ]);
-  return { org, runs, deadLetters, circuitOpen };
+  return { org, runs: runsResult, deadLetters, circuitOpen };
 }

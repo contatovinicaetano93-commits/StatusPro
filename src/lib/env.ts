@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEV_AUTH_SECRET_FALLBACK } from "@/lib/auth-secret";
 
 const rawSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -49,13 +50,13 @@ export function getEnv(): AppEnv {
 
   const raw = parsed.data;
   const isProd = raw.NODE_ENV === "production";
-  const authSecret = raw.AUTH_SECRET ?? (isProd ? "" : "statuspro-dev-secret-change-me");
+  const authSecret = raw.AUTH_SECRET ?? (isProd ? "" : DEV_AUTH_SECRET_FALLBACK);
 
   if (isProd) {
     if (!authSecret || authSecret.length < 16) {
       throw new Error("Invalid environment: AUTH_SECRET is required in production (min 16 chars)");
     }
-    if (authSecret === "statuspro-dev-secret-change-me") {
+    if (authSecret === DEV_AUTH_SECRET_FALLBACK) {
       throw new Error("Invalid environment: AUTH_SECRET must not use the development default in production");
     }
   }
