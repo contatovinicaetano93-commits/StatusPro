@@ -17,7 +17,10 @@ export async function runErpSync(organizationId: string): Promise<RunErpSyncResu
   if (!org) return { ok: false, error: "Org ausente" };
 
   if (await isErpCircuitOpen(org.id)) {
-    return { ok: false, error: "ERP em circuit breaker — aguarde o cooldown (via sync_runs)." };
+    return {
+      ok: false,
+      error: "ERP em circuit breaker — aguarde ~5 min (3 falhas consecutivas em sync_runs).",
+    };
   }
 
   const erp = getErpGateway();

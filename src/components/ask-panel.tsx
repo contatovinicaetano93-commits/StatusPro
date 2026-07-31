@@ -12,15 +12,56 @@ const SUGGESTIONS = [
 ];
 
 export function AskPanel() {
+  const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string>("");
   const [pending, start] = useTransition();
+
+  function ask(q: string) {
+    const trimmed = q.trim();
+    if (trimmed.length < 3) {
+      setAnswer("Digite uma pergunta com pelo menos 3 caracteres.");
+      return;
+    }
+    start(async () => {
+      const text = await askStatusProAction(trimmed);
+      setAnswer(text);
+    });
+  }
 
   return (
     <section className="panel">
       <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.15rem" }}>Pergunte ao StatusPro</h2>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Respostas com KPIs/alertas carregados no servidor — sem inventar número.
+        Pergunta livre ou sugestões — fatos via tools no servidor, sem inventar número.
       </p>
+      <form
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          ask(question);
+        }}
+      >
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ex.: Por que o fill rate caiu hoje?"
+          disabled={pending}
+          maxLength={500}
+          style={{
+            flex: "1 1 220px",
+            minWidth: 0,
+            background: "var(--panel)",
+            border: "1px solid var(--line)",
+            color: "var(--ink)",
+            borderRadius: 8,
+            padding: "0.55rem 0.7rem",
+            font: "inherit",
+          }}
+        />
+        <button className="btn btn-primary" type="submit" disabled={pending}>
+          {pending ? "Consultando…" : "Perguntar"}
+        </button>
+      </form>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {SUGGESTIONS.map((q) => (
           <button
@@ -28,12 +69,10 @@ export function AskPanel() {
             className="btn"
             type="button"
             disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const text = await askStatusProAction(q);
-                setAnswer(text);
-              })
-            }
+            onClick={() => {
+              setQuestion(q);
+              ask(q);
+            }}
           >
             {q}
           </button>

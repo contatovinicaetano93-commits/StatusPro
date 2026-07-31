@@ -1,11 +1,235 @@
 import pg from "pg";
 import { getEnv } from "@/lib/env";
 import { getSql } from "@/infrastructure/db/client";
-import type { ErpPullResult } from "@/infrastructure/erp/gateway";
+import {
+  ErpInvoiceSchema,
+  ErpOrderSchema,
+  ErpPaymentSchema,
+  ErpReceivableSchema,
+  type ErpPullResult,
+} from "@/infrastructure/erp/gateway";
 import type { OperationalAlertDraft } from "@/domain/alerts/schemas";
 import type { RecomputePull, RecomputeSnapshot } from "@/domain/kpis/recompute";
-import { insertSyncDeadLetter } from "@/infrastructure/db/repositories";
 import { logger } from "@/lib/logger";
+
+type DeadLetterDraft = {
+  entityType: string;
+  payload: unknown;
+  errorMessage: string;
+};
+
+async function insertDeadLettersInTxn(
+  client: pg.Client,
+  organizationId: string,
+  drafts: DeadLetterDraft[],
+): Promise<void> {
+  for (const d of drafts) {
+    await client.query(
+      `INSERT INTO sync_dead_letters (
+         organization_id, entity_type, payload, error_message
+       ) VALUES ($1, $2, $3::jsonb, $4)`,
+      [organizationId, d.entityType, JSON.stringify(d.payload), d.errorMessage],
+    );
+  }
+}
+
+async function resolveCustomerId(
+  client: pg.Client,
+  organizationId: string,
+  customerExternalId: string,
+): Promise<string | null> {
+  const rows = await client.query(
+    `SELECT id FROM customers
+     WHERE organization_id = $1 AND external_id = $2
+     LIMIT 1`,
+    [organizationId, customerExternalId],
+  );
+  return rows.rows[0] ? String(rows.rows[0].id) : null;
+}
+
+type RetryEntityType = "sales_order" | "invoice" | "receivable" | "payment";
+
+function asRetryEntityType(entityType: string): RetryEntityType | null {
+  switch (entityType) {
+    case "sales_order":
+    case "invoice":
+    case "receivable":
+    case "payment":
+      return entityType;
+    default:
+      return null;
+  }
+}
+
+/** Retry a single open dead-letter payload (orders / invoices / receivables / payments). */
+export async function retryDeadLetterUpsert(args: {
+  organizationId: string;
+  entityType: string;
+  payload: unknown;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { organizationId, payload } = args;
+  const entityType = asRetryEntityType(args.entityType);
+  if (!entityType) {
+    return { ok: false, error: `Tipo não suportado para retry: ${args.entityType}` };
+  }
+
+  try {
+    return await withPg(async (client) => {
+      await client.query("BEGIN");
+      try {
+        let softError: string | null = null;
+
+        switch (entityType) {
+          case "sales_order": {
+            const o = ErpOrderSchema.parse(payload);
+            const customerId = await resolveCustomerId(client, organizationId, o.customerExternalId);
+            if (!customerId) {
+              softError = `customer missing: ${o.customerExternalId}`;
+              break;
+            }
+            await client.query(
+              `INSERT INTO sales_orders (
+                 organization_id, external_id, customer_id, order_date, due_date, status, uf,
+                 requested_lines, fulfilled_lines, on_time_in_full, net_amount_brl, cogs_brl
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+               ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
+               DO UPDATE SET
+                 status = EXCLUDED.status,
+                 requested_lines = EXCLUDED.requested_lines,
+                 fulfilled_lines = EXCLUDED.fulfilled_lines,
+                 on_time_in_full = EXCLUDED.on_time_in_full,
+                 net_amount_brl = EXCLUDED.net_amount_brl,
+                 cogs_brl = EXCLUDED.cogs_brl`,
+              [
+                organizationId,
+                o.externalId,
+                customerId,
+                o.orderDate,
+                o.dueDate ?? null,
+                o.status,
+                o.uf,
+                o.requestedLines,
+                o.fulfilledLines,
+                o.onTimeInFull,
+                o.netAmountBrl,
+                o.cogsBrl,
+              ],
+            );
+            break;
+          }
+          case "invoice": {
+            const inv = ErpInvoiceSchema.parse(payload);
+            const customerId = await resolveCustomerId(
+              client,
+              organizationId,
+              inv.customerExternalId,
+            );
+            if (!customerId) {
+              softError = `customer missing: ${inv.customerExternalId}`;
+              break;
+            }
+            await client.query(
+              `INSERT INTO invoices (
+                 organization_id, customer_id, invoice_date, net_amount_brl, cogs_brl, uf, external_id
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
+               DO UPDATE SET
+                 net_amount_brl = EXCLUDED.net_amount_brl,
+                 cogs_brl = EXCLUDED.cogs_brl,
+                 uf = EXCLUDED.uf,
+                 invoice_date = EXCLUDED.invoice_date`,
+              [
+                organizationId,
+                customerId,
+                inv.invoiceDate,
+                inv.netAmountBrl,
+                inv.cogsBrl,
+                inv.uf,
+                inv.externalId,
+              ],
+            );
+            break;
+          }
+          case "receivable": {
+            const r = ErpReceivableSchema.parse(payload);
+            const customerId = await resolveCustomerId(
+              client,
+              organizationId,
+              r.customerExternalId,
+            );
+            if (!customerId) {
+              softError = `customer missing: ${r.customerExternalId}`;
+              break;
+            }
+            await client.query(
+              `INSERT INTO receivables (
+                 organization_id, customer_id, due_date, open_amount_brl, status, external_id
+               ) VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
+               DO UPDATE SET
+                 open_amount_brl = EXCLUDED.open_amount_brl,
+                 status = EXCLUDED.status,
+                 due_date = EXCLUDED.due_date`,
+              [
+                organizationId,
+                customerId,
+                r.dueDate,
+                r.openAmountBrl,
+                r.status,
+                r.externalId,
+              ],
+            );
+            break;
+          }
+          case "payment": {
+            const p = ErpPaymentSchema.parse(payload);
+            const customerId = await resolveCustomerId(
+              client,
+              organizationId,
+              p.customerExternalId,
+            );
+            if (!customerId) {
+              softError = `customer missing: ${p.customerExternalId}`;
+              break;
+            }
+            await client.query(
+              `INSERT INTO payments (
+                 organization_id, customer_id, payment_date, amount_brl, external_id
+               ) VALUES ($1,$2,$3,$4,$5)
+               ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
+               DO UPDATE SET amount_brl = EXCLUDED.amount_brl`,
+              [
+                organizationId,
+                customerId,
+                p.paymentDate,
+                p.amountBrl,
+                paymentExternalId(p),
+              ],
+            );
+            break;
+          }
+          default: {
+            const _exhaustive: never = entityType;
+            return { ok: false as const, error: `Tipo não suportado: ${String(_exhaustive)}` };
+          }
+        }
+
+        if (softError) {
+          await client.query("ROLLBACK");
+          return { ok: false as const, error: softError };
+        }
+
+        await client.query("COMMIT");
+        return { ok: true as const };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      }
+    });
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
 
 const DEFAULT_UFS = ["SP", "RJ", "MG", "PR", "RS", "BA", "GO", "SC", "PE", "DF"] as const;
 
@@ -229,12 +453,13 @@ export async function upsertErpFacts(args: {
     await withPg(async (client) => {
       await client.query("BEGIN");
       try {
+        const deadLetters: DeadLetterDraft[] = [];
+
         const orderRows = pull.orders
           .map((o) => {
             const customerId = customerMap.get(o.customerExternalId);
             if (!customerId) {
-              void insertSyncDeadLetter({
-                organizationId,
+              deadLetters.push({
                 entityType: "sales_order",
                 payload: o,
                 errorMessage: `customer missing: ${o.customerExternalId}`,
@@ -280,7 +505,14 @@ export async function upsertErpFacts(args: {
         const invoiceRows = pull.invoices
           .map((inv) => {
             const customerId = customerMap.get(inv.customerExternalId);
-            if (!customerId) return null;
+            if (!customerId) {
+              deadLetters.push({
+                entityType: "invoice",
+                payload: inv,
+                errorMessage: `customer missing: ${inv.customerExternalId}`,
+              });
+              return null;
+            }
             return [
               organizationId,
               customerId,
@@ -312,7 +544,14 @@ export async function upsertErpFacts(args: {
         const receivableRows = pull.receivables
           .map((r) => {
             const customerId = customerMap.get(r.customerExternalId);
-            if (!customerId) return null;
+            if (!customerId) {
+              deadLetters.push({
+                entityType: "receivable",
+                payload: r,
+                errorMessage: `customer missing: ${r.customerExternalId}`,
+              });
+              return null;
+            }
             return [
               organizationId,
               customerId,
@@ -342,7 +581,14 @@ export async function upsertErpFacts(args: {
         const paymentRows = pull.payments
           .map((p) => {
             const customerId = customerMap.get(p.customerExternalId);
-            if (!customerId) return null;
+            if (!customerId) {
+              deadLetters.push({
+                entityType: "payment",
+                payload: p,
+                errorMessage: `customer missing: ${p.customerExternalId}`,
+              });
+              return null;
+            }
             return [
               organizationId,
               customerId,
@@ -403,6 +649,8 @@ export async function upsertErpFacts(args: {
           5,
         );
         counts.error += pull.stock.length - stockRows.length;
+
+        await insertDeadLettersInTxn(client, organizationId, deadLetters);
 
         await client.query("COMMIT");
       } catch (err) {

@@ -1,5 +1,6 @@
 import {
   getSyncRuns,
+  isErpCircuitOpen,
   listSyncDeadLetters,
   type SyncDeadLetterRow,
   type SyncRunRow,
@@ -11,13 +12,15 @@ export type SyncCenterView = {
   org: OrgContext | null;
   runs: SyncRunRow[];
   deadLetters: SyncDeadLetterRow[];
+  circuitOpen: boolean;
 };
 
 export async function getSyncCenter(): Promise<SyncCenterView> {
   const { org } = await requireTenant();
-  const [runs, deadLetters] = await Promise.all([
+  const [runs, deadLetters, circuitOpen] = await Promise.all([
     getSyncRuns(org.id),
     listSyncDeadLetters(org.id),
+    isErpCircuitOpen(org.id),
   ]);
-  return { org, runs, deadLetters };
+  return { org, runs, deadLetters, circuitOpen };
 }

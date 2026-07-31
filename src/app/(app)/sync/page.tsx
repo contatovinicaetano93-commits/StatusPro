@@ -1,8 +1,8 @@
 import { getSyncCenter } from "@/application/get-sync-center";
-import { SyncControls } from "@/components/sync-controls";
+import { DeadLetterActions, SyncControls } from "@/components/sync-controls";
 
 export default async function SyncPage() {
-  const { runs, deadLetters } = await getSyncCenter();
+  const { runs, deadLetters, circuitOpen } = await getSyncCenter();
 
   return (
     <div>
@@ -11,7 +11,7 @@ export default async function SyncPage() {
         Integração via <code>ErpGateway</code> (mock agora; FKN/SIFWin quando houver API). Pipeline
         orquestrado no use-case <code>runErpSync</code> — KPIs recomputados dos fatos no DB.
       </p>
-      <SyncControls />
+      <SyncControls circuitOpen={circuitOpen} />
       <section className="panel" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Últimas execuções</h2>
         {runs.length === 0 ? (
@@ -50,11 +50,11 @@ export default async function SyncPage() {
 
       <section className="panel" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>
-          Dead letters ({deadLetters.length})
+          Dead letters abertas ({deadLetters.length})
         </h2>
         {deadLetters.length === 0 ? (
           <p className="muted" style={{ marginBottom: 0 }}>
-            Nenhuma entidade rejeitada no upsert.
+            Nenhuma entidade rejeitada pendente.
           </p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -64,6 +64,7 @@ export default async function SyncPage() {
                 <th style={{ textAlign: "left" }}>Tipo</th>
                 <th style={{ textAlign: "left" }}>Erro</th>
                 <th style={{ textAlign: "left" }}>Payload</th>
+                <th style={{ textAlign: "left" }}>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -76,8 +77,14 @@ export default async function SyncPage() {
                     <code>{d.entityType}</code>
                   </td>
                   <td>{d.errorMessage}</td>
-                  <td className="muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <td
+                    className="muted"
+                    style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}
+                  >
                     {d.payloadPreview}
+                  </td>
+                  <td>
+                    <DeadLetterActions id={d.id} />
                   </td>
                 </tr>
               ))}

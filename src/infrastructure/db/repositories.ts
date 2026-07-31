@@ -347,6 +347,31 @@ export type SyncDeadLetterRow = {
   createdAt: string;
 };
 
+export type SyncDeadLetterDetail = {
+  id: string;
+  organizationId: string;
+  entityType: string;
+  errorMessage: string;
+  payload: unknown;
+  createdAt: string;
+};
+
+function mapDeadLetterListRow(r: Record<string, unknown>): SyncDeadLetterRow {
+  const payload = r.payload;
+  const preview =
+    typeof payload === "string"
+      ? payload.slice(0, 160)
+      : JSON.stringify(payload).slice(0, 160);
+  return {
+    id: String(r.id),
+    entityType: String(r.entity_type),
+    errorMessage: String(r.error_message),
+    payloadPreview: preview,
+    createdAt: new Date(String(r.created_at)).toISOString(),
+  };
+}
+
+/** Open dead letters only (`reprocessed_at IS NULL`). */
 export async function listSyncDeadLetters(
   orgId: string,
   limit = 20,
@@ -357,36 +382,79 @@ export async function listSyncDeadLetters(
       SELECT id, entity_type, error_message, payload, created_at
       FROM sync_dead_letters
       WHERE organization_id = ${orgId}
+        AND reprocessed_at IS NULL
       ORDER BY created_at DESC
       LIMIT ${limit}
     `;
-    return rows.map((r) => {
-      const payload = r.payload;
-      const preview =
-        typeof payload === "string"
-          ? payload.slice(0, 160)
-          : JSON.stringify(payload).slice(0, 160);
-      return {
-        id: String(r.id),
-        entityType: String(r.entity_type),
-        errorMessage: String(r.error_message),
-        payloadPreview: preview,
-        createdAt: new Date(String(r.created_at)).toISOString(),
-      };
-    });
+    return rows.map((r) => mapDeadLetterListRow(r as Record<string, unknown>));
   } catch {
     return [];
   }
 }
 
+export async function getSyncDeadLetter(
+  orgId: string,
+  id: string,
+): Promise<SyncDeadLetterDetail | null> {
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, organization_id, entity_type, error_message, payload, created_at
+      FROM sync_dead_letters
+      WHERE organization_id = ${orgId}
+        AND id = ${id}
+        AND reprocessed_at IS NULL
+      LIMIT 1
+    `;
+    const r = rows[0] as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return {
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      entityType: String(r.entity_type),
+      errorMessage: String(r.error_message),
+      payload: r.payload,
+      createdAt: new Date(String(r.created_at)).toISOString(),
+    };
+  } catch (err) {
+    logger.warn("getSyncDeadLetter failed", { err: String(err) });
+    return null;
+  }
+}
+
+export async function markSyncDeadLetterReprocessed(
+  orgId: string,
+  id: string,
+): Promise<boolean> {
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      UPDATE sync_dead_letters
+      SET reprocessed_at = NOW()
+      WHERE organization_id = ${orgId}
+        AND id = ${id}
+        AND reprocessed_at IS NULL
+      RETURNING id
+    `;
+    return rows.length > 0;
+  } catch (err) {
+    logger.warn("markSyncDeadLetterReprocessed failed", { err: String(err) });
+    return false;
+  }
+}
+
+/** Default cooldown: 5 minutes after a streak of consecutive failures. */
+export const ERP_CIRCUIT_COOLDOWN_MS = 5 * 60_000;
+
 /**
  * Persisted circuit via sync_runs: open when the last `threshold` runs are failed
  * and the newest failure is still inside cooldownMs. Survives serverless isolates.
+ * Fail-closed: if we cannot read sync_runs, treat circuit as open.
  */
 export async function isErpCircuitOpen(
   orgId: string,
   threshold = 3,
-  cooldownMs = 30_000,
+  cooldownMs = ERP_CIRCUIT_COOLDOWN_MS,
 ): Promise<boolean> {
   try {
     const runs = await getSyncRuns(orgId, threshold);
@@ -397,7 +465,7 @@ export async function isErpCircuitOpen(
     if (!newest) return false;
     return Date.now() - new Date(newest.startedAt).getTime() < cooldownMs;
   } catch {
-    return false;
+    return true;
   }
 }
 

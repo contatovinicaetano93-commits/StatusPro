@@ -1,8 +1,6 @@
 import type { CSSProperties } from "react";
 import { loginAction } from "@/app/actions";
-import { DEMO_USERS } from "@/infrastructure/auth/session";
-import { ROLE_LABELS } from "@/domain/roles";
-import { getBrand } from "@/lib/brand";
+import { getLoginOptions } from "@/application/get-login-options";
 
 export default async function LoginPage({
   searchParams,
@@ -10,14 +8,16 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const params = await searchParams;
-  const brand = getBrand();
+  const view = await getLoginOptions();
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 animate-rise">
-        <p className="text-[0.65rem] uppercase tracking-[0.25em] text-accent">{brand.displayName}</p>
+        <p className="text-[0.65rem] uppercase tracking-[0.25em] text-accent">
+          {view.brandDisplayName}
+        </p>
         <h1 className="mt-2 text-xl font-semibold">Acesso ao cockpit</h1>
-        <p className="mt-2 text-sm text-muted">{brand.loginSubtitle}</p>
+        <p className="mt-2 text-sm text-muted">{view.loginSubtitle}</p>
 
         {params.error === "1" ? (
           <p className="mt-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -38,10 +38,10 @@ export default async function LoginPage({
         <form action={loginAction} className="mt-6 flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <span className="text-xs uppercase tracking-wide text-muted">Perfil</span>
-            <select name="email" defaultValue="ceo@statuspro.local" style={inputStyle}>
-              {DEMO_USERS.map((u) => (
+            <select name="email" defaultValue={view.defaultEmail} style={inputStyle}>
+              {view.options.map((u) => (
                 <option key={u.email} value={u.email}>
-                  {ROLE_LABELS[u.role]} — {u.email}
+                  {u.label}
                 </option>
               ))}
             </select>

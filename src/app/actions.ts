@@ -3,96 +3,91 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { loginDemoUser, logoutCookieName } from "@/application/login-demo";
 import {
-  AUTH_COOKIE,
-  DEMO_USERS,
-  createSessionToken,
-  type SessionUser,
-} from "@/infrastructure/auth/session";
-import { getOrganizationBySlug } from "@/infrastructure/db/repositories";
-import { getEnv } from "@/lib/env";
-import { AuthError, requireRoles, requireSession } from "@/infrastructure/auth/guards";
-import { canRunBriefing, canRunSync, homePathForRole } from "@/domain/access";
-import { regenerateBriefing } from "@/application/regenerate-briefing";
-import { runErpSync } from "@/application/run-erp-sync";
+  asAuthFailure,
+  regenerateBriefingForSession,
+  runErpSyncForSession,
+} from "@/application/session-actions";
+import {
+  ackSyncDeadLetter,
+  retrySyncDeadLetter,
+} from "@/application/dead-letter-actions";
 
 export async function loginAction(formData: FormData) {
-  const env = getEnv();
-  if (env.NODE_ENV === "production" && !env.ALLOW_DEMO_AUTH) {
-    redirect("/login?error=demo_disabled");
+  const result = await loginDemoUser({
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+  });
+
+  if (!result.ok) {
+    redirect(`/login?error=${result.error === "invalid" ? "1" : result.error}`);
   }
 
-  const email = String(formData.get("email") ?? "");
-  const password = String(formData.get("password") ?? "");
-  const demo = DEMO_USERS.find((u) => u.email === email && u.password === password);
-  if (!demo) {
-    redirect("/login?error=1");
-  }
-
-  const org = await getOrganizationBySlug(demo.organizationSlug);
-  if (!org) {
-    redirect("/login?error=org");
-  }
-
-  const user: SessionUser = {
-    id: `demo-${demo.role}`,
-    email: demo.email,
-    name: demo.name,
-    role: demo.role,
-    organizationId: org.id,
-    organizationSlug: demo.organizationSlug,
-  };
-  const token = await createSessionToken(user);
   const jar = await cookies();
-  jar.set(AUTH_COOKIE, token, {
+  jar.set(result.cookieName, result.token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    secure: result.secure,
     path: "/",
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: result.maxAge,
   });
-  redirect(homePathForRole(user.role));
+  redirect(result.redirectTo);
 }
 
 export async function logoutAction() {
   const jar = await cookies();
-  jar.delete(AUTH_COOKIE);
+  jar.delete(logoutCookieName());
   redirect("/login");
 }
 
 export async function regenerateBriefingAction() {
   try {
-    const session = await requireSession();
-    if (!canRunBriefing(session.role)) {
-      return { ok: false as const, error: "Sem permissão para gerar briefing." };
-    }
-    const result = await regenerateBriefing(session.organizationId);
+    const result = await regenerateBriefingForSession();
     if (result.ok) revalidatePath("/ceo");
     return result;
   } catch (err) {
-    if (err instanceof AuthError) {
-      return { ok: false as const, error: err.message };
-    }
+    const msg = asAuthFailure(err);
+    if (msg) return { ok: false as const, error: msg };
     throw err;
   }
 }
 
 export async function runMockSyncAction() {
   try {
-    const session = await requireRoles(["admin", "ceo"]);
-    if (!canRunSync(session.role)) {
-      return { ok: false as const, error: "Sem permissão para sync." };
-    }
-    const result = await runErpSync(session.organizationId);
+    const result = await runErpSyncForSession();
     if (result.ok) {
       revalidatePath("/sync");
       revalidatePath("/ceo");
     }
     return result;
   } catch (err) {
-    if (err instanceof AuthError) {
-      return { ok: false as const, error: err.message };
-    }
+    const msg = asAuthFailure(err);
+    if (msg) return { ok: false as const, error: msg };
+    throw err;
+  }
+}
+
+export async function ackDeadLetterAction(deadLetterId: string) {
+  try {
+    const result = await ackSyncDeadLetter(deadLetterId);
+    if (result.ok) revalidatePath("/sync");
+    return result;
+  } catch (err) {
+    const msg = asAuthFailure(err);
+    if (msg) return { ok: false as const, error: msg };
+    throw err;
+  }
+}
+
+export async function retryDeadLetterAction(deadLetterId: string) {
+  try {
+    const result = await retrySyncDeadLetter(deadLetterId);
+    if (result.ok) revalidatePath("/sync");
+    return result;
+  } catch (err) {
+    const msg = asAuthFailure(err);
+    if (msg) return { ok: false as const, error: msg };
     throw err;
   }
 }

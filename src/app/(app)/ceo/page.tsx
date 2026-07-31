@@ -2,7 +2,6 @@ import { FreshnessBanner } from "@/components/freshness-banner";
 import { KpiStrip } from "@/components/kpi-strip";
 import { AskPanel, BriefingActions } from "@/components/ask-panel";
 import { getCeoHome } from "@/application/get-ceo-home";
-import { isFeatureEnabled } from "@/lib/env";
 
 export default async function CeoPage() {
   const home = await getCeoHome("daily");
@@ -46,7 +45,7 @@ export default async function CeoPage() {
         <section className="panel">
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
             <h2 style={{ margin: 0, fontSize: "1.2rem" }}>Briefing do CEO</h2>
-            {isFeatureEnabled("ai_briefing") ? <BriefingActions /> : null}
+            {home.aiBriefingEnabled ? <BriefingActions /> : null}
           </div>
           <article style={{ marginTop: "0.9rem", whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: 15 }}>
             {home.briefing?.contentMd ??

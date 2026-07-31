@@ -7,6 +7,7 @@ import {
 } from "@/infrastructure/db/repositories";
 import { toRankedAlertView, type RankedAlertView } from "@/domain/alerts/to-ranked-view";
 import { resolveOrg } from "@/application/resolve-org";
+import { isFeatureEnabled } from "@/lib/env";
 import type { Freshness, Horizon, OrgContext } from "@/domain/types";
 
 export type BandedKpi = Awaited<ReturnType<typeof getLatestKpis>>[number];
@@ -19,6 +20,7 @@ export type CeoHomeView = {
   briefing: Awaited<ReturnType<typeof getLatestBriefing>>;
   freshness: Freshness;
   checklist: Array<{ id: string; label: string; done: boolean }>;
+  aiBriefingEnabled: boolean;
 };
 
 /** CEO pulse only — stockouts/overdue live on dedicated boards. */
@@ -27,6 +29,8 @@ export async function getCeoHome(
   organizationId?: string,
 ): Promise<CeoHomeView> {
   const org = await resolveOrg(organizationId);
+  const aiBriefingEnabled = isFeatureEnabled("ai_briefing");
+
   if (!org) {
     return {
       org: null,
@@ -35,6 +39,7 @@ export async function getCeoHome(
       briefing: null,
       freshness: { asOf: null, ageMinutes: null, quality: "error", source: null },
       checklist: defaultChecklist(),
+      aiBriefingEnabled,
     };
   }
 
@@ -53,6 +58,7 @@ export async function getCeoHome(
     briefing,
     freshness,
     checklist: defaultChecklist(alerts.length, stockouts.length),
+    aiBriefingEnabled,
   };
 }
 
